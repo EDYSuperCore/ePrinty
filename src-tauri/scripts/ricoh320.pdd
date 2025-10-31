@@ -1,0 +1,675 @@
+*PPD-Adobe: "4.3"
+*%%%% PPD file for SP 325SNw with CUPS.
+*%%%% Created by the CUPS PPD Compiler CUPS v2.1.0.
+*% Copyright 2007-2012 by Apple Inc.
+*% (C) Copyright 1994-2016 Primax Electronics Ltd. All Rights Reserved.
+*% 
+*% These coded instructions, statements, and computer programs are the
+*% property of Apple Inc. and are protected by Federal copyright
+*% law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+*% which should have been included with this file.  If this file is
+*% file is missing or damaged, see the license at "http://www.cups.org/".
+*FormatVersion: "4.3"
+*FileVersion: 1.01
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "RICOH SP 325SNw.ppd"
+*Product: "RICOH SP 325SNw"
+*Product: "(RICOH SP 325SNw)"
+*Manufacturer: "RICOH"
+*ModelName: "RICOH SP 325SNw"
+*ShortNickName: "SP 325SNw"
+*NickName: "RICOH SP 325SNw"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "8"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*% Driver-defined attributes...
+*1284DeviceID: "CMD:PCL;"
+*cupsBackSide: "Normal"
+*cupsVersion: 2.1
+*cupsModelNumber: 0
+*cupsManualCopies: False
+*cupsFilter: "application/vnd.cups-raster 50 rastertohp"
+*cupsLanguages: "en ja de fr it es nl sv da no pl pt cs hu fi ru pt_BR zh_CN zh_TW tr kk ar"
+*UIConstraints: *InputSlot Tray1 *PageSize Env10
+*UIConstraints: *PageSize Env10 *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageSize EnvMonarch
+*UIConstraints: *PageSize EnvMonarch *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageSize EnvDL
+*UIConstraints: *PageSize EnvDL *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageSize EnvC5
+*UIConstraints: *PageSize EnvC5 *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageRegion Env10
+*UIConstraints: *PageRegion Env10 *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageRegion EnvMonarch
+*UIConstraints: *PageRegion EnvMonarch *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageRegion EnvDL
+*UIConstraints: *PageRegion EnvDL *InputSlot Tray1
+*UIConstraints: *InputSlot Tray1 *PageRegion EnvC5
+*UIConstraints: *PageRegion EnvC5 *InputSlot Tray1
+*UIConstraints: *Duplex DuplexNoTumble *PageSize A5
+*UIConstraints: *PageSize A5 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageSize Env10
+*UIConstraints: *PageSize Env10 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageSize EnvMonarch
+*UIConstraints: *PageSize EnvMonarch *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageSize EnvC5
+*UIConstraints: *PageSize EnvC5 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageSize EnvDL
+*UIConstraints: *PageSize EnvDL *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexTumble *PageSize A5
+*UIConstraints: *PageSize A5 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageSize Env10
+*UIConstraints: *PageSize Env10 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageSize EnvMonarch
+*UIConstraints: *PageSize EnvMonarch *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageSize EnvC5
+*UIConstraints: *PageSize EnvC5 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageSize EnvDL
+*UIConstraints: *PageSize EnvDL *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageRegion A5
+*UIConstraints: *PageRegion A5 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageRegion Env10
+*UIConstraints: *PageRegion Env10 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageRegion EnvMonarch
+*UIConstraints: *PageRegion EnvMonarch *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageRegion EnvC5
+*UIConstraints: *PageRegion EnvC5 *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexNoTumble *PageRegion EnvDL
+*UIConstraints: *PageRegion EnvDL *Duplex DuplexNoTumble
+*UIConstraints: *Duplex DuplexTumble *PageRegion A5
+*UIConstraints: *PageRegion A5 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageRegion Env10
+*UIConstraints: *PageRegion Env10 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageRegion EnvMonarch
+*UIConstraints: *PageRegion EnvMonarch *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageRegion EnvC5
+*UIConstraints: *PageRegion EnvC5 *Duplex DuplexTumble
+*UIConstraints: *Duplex DuplexTumble *PageRegion EnvDL
+*UIConstraints: *PageRegion EnvDL *Duplex DuplexTumble
+*OpenUI *PageSize/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: Letter
+*PageSize A4/A4 (210 x 297 mm): "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageSize Letter/Letter (8.5" x 11"): "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageSize A5/A5 (148 x 210 mm): "<</PageSize[420 595]/ImagingBBox null>>setpagedevice"
+*PageSize Legal/Legal (8.5" x 14"): "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageSize Env10/Com10 (104.8 x 241.3 mm): "<</PageSize[297 684]/ImagingBBox null>>setpagedevice"
+*PageSize EnvMonarch/Monarch (98.4 x 190.5 mm): "<</PageSize[279 540]/ImagingBBox null>>setpagedevice"
+*PageSize EnvDL/DL Env (110 x 220 mm): "<</PageSize[312 624]/ImagingBBox null>>setpagedevice"
+*PageSize EnvC5/C5 Env (162 x 229 mm): "<</PageSize[459 649]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+*OpenUI *PageRegion/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: Letter
+*PageRegion A4/A4 (210 x 297 mm): "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageRegion Letter/Letter (8.5" x 11"): "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageRegion A5/A5 (148 x 210 mm): "<</PageSize[420 595]/ImagingBBox null>>setpagedevice"
+*PageRegion Legal/Legal (8.5" x 14"): "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageRegion Env10/Com10 (104.8 x 241.3 mm): "<</PageSize[297 684]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvMonarch/Monarch (98.4 x 190.5 mm): "<</PageSize[279 540]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvDL/DL Env (110 x 220 mm): "<</PageSize[312 624]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvC5/C5 Env (162 x 229 mm): "<</PageSize[459 649]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+*DefaultImageableArea: Letter
+*ImageableArea A4/A4 (210 x 297 mm): "18 18 577 824"
+*ImageableArea Letter/Letter (8.5" x 11"): "18 18 594 774"
+*ImageableArea A5/A5 (148 x 210 mm): "18 18 402 577"
+*ImageableArea Legal/Legal (8.5" x 14"): "18 18 594 990"
+*ImageableArea Env10/Com10 (104.8 x 241.3 mm): "18 18 279 666"
+*ImageableArea EnvMonarch/Monarch (98.4 x 190.5 mm): "18 18 261 522"
+*ImageableArea EnvDL/DL Env (110 x 220 mm): "18 18 294 606"
+*ImageableArea EnvC5/C5 Env (162 x 229 mm): "18 18 441 631"
+*DefaultPaperDimension: Letter
+*PaperDimension A4/A4 (210 x 297 mm): "595 842"
+*PaperDimension Letter/Letter (8.5" x 11"): "612 792"
+*PaperDimension A5/A5 (148 x 210 mm): "420 595"
+*PaperDimension Legal/Legal (8.5" x 14"): "612 1008"
+*PaperDimension Env10/Com10 (104.8 x 241.3 mm): "297 684"
+*PaperDimension EnvMonarch/Monarch (98.4 x 190.5 mm): "279 540"
+*PaperDimension EnvDL/DL Env (110 x 220 mm): "312 624"
+*PaperDimension EnvC5/C5 Env (162 x 229 mm): "459 649"
+*OpenUI *Resolution/Resolution: PickOne
+*OrderDependency: 20 AnySetup *Resolution
+*DefaultResolution: 600dpi
+*Resolution 600dpi/600dpi: "<</HWResolution[600 600]/cupsBitsPerColor 1/cupsRowCount 0/cupsRowFeed 0/cupsRowStep 0/cupsColorSpace 3>>setpagedevice"
+*CloseUI: *Resolution
+*OpenUI *InputSlot/Input Tray: PickOne
+*OrderDependency: 10 AnySetup *InputSlot
+*DefaultInputSlot: AutoSelect
+*InputSlot AutoSelect/Auto Tray Select: "<</MediaPosition 7>>setpagedevice"
+*InputSlot Manual/Bypass Tray: "<</MediaPosition 24>>setpagedevice"
+*InputSlot Tray1/Tray 1: "<</MediaPosition 8>>setpagedevice"
+*CloseUI: *InputSlot
+*OpenUI *Duplex/Duplex: PickOne
+*OrderDependency: 20 AnySetup *Duplex
+*DefaultDuplex: None
+*Duplex None/Off: "<</Duplex false>>setpagedevice"
+*Duplex DuplexNoTumble/Long-Edge Binding: "<</Duplex true/Tumble false>>setpagedevice"
+*Duplex DuplexTumble/Short-Edge Binding: "<</Duplex true/Tumble true>>setpagedevice"
+*CloseUI: *Duplex
+*ja.Translation Manufacturer/RICOH: ""
+*ja.Translation ModelName/RICOH SP 325SNw: ""
+*ja.Translation ShortNickName/SP 325SNw: ""
+*ja.Translation NickName/RICOH SP 325SNw: ""
+*ja.Translation PageSize/メディアサイズ: ""
+*ja.PageSize A4/A4 (210 x 297 mm): ""
+*ja.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*ja.PageSize A5/A5 (148 x 210 mm): ""
+*ja.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*ja.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*ja.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*ja.PageSize EnvDL/DL封筒 (110 x 220 mm): ""
+*ja.PageSize EnvC5/C5封筒 (162 x 229 mm): ""
+*ja.Translation Resolution/解像度: ""
+*ja.Resolution 600dpi/600 dpi: ""
+*ja.Translation InputSlot/Input Tray: ""
+*ja.InputSlot AutoSelect/自動トレイ選択: ""
+*ja.InputSlot Manual/手差し: ""
+*ja.InputSlot Tray1/トレイ1: ""
+*ja.Translation Duplex/Duplex: ""
+*ja.Duplex None/しない: ""
+*ja.Duplex DuplexNoTumble/長辺とじ: ""
+*ja.Duplex DuplexTumble/短辺とじ: ""
+*de.Translation Manufacturer/RICOH: ""
+*de.Translation ModelName/RICOH SP 325SNw: ""
+*de.Translation ShortNickName/SP 325SNw: ""
+*de.Translation NickName/RICOH SP 325SNw: ""
+*de.Translation PageSize/Mediengröße: ""
+*de.PageSize A4/A4 (210 x 297 mm): ""
+*de.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*de.PageSize A5/A5 (148 x 210 mm): ""
+*de.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*de.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*de.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*de.PageSize EnvDL/DL Umschl. (110 x 220 mm): ""
+*de.PageSize EnvC5/C5 Umschl. (162 x 229 mm): ""
+*de.Translation Resolution/Auflösung: ""
+*de.Resolution 600dpi/600 dpi: ""
+*de.Translation InputSlot/Input Tray: ""
+*de.InputSlot AutoSelect/Automatische Magazinwahl: ""
+*de.InputSlot Manual/Bypass: ""
+*de.InputSlot Tray1/Magazin 1: ""
+*de.Translation Duplex/Duplex: ""
+*de.Duplex None/Aus: ""
+*de.Duplex DuplexNoTumble/Bindung lange Kante: ""
+*de.Duplex DuplexTumble/Bindung kurze Kante: ""
+*fr.Translation Manufacturer/RICOH: ""
+*fr.Translation ModelName/RICOH SP 325SNw: ""
+*fr.Translation ShortNickName/SP 325SNw: ""
+*fr.Translation NickName/RICOH SP 325SNw: ""
+*fr.Translation PageSize/Taille du papier: ""
+*fr.PageSize A4/A4 (210 x 297 mm): ""
+*fr.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*fr.PageSize A5/A5 (148 x 210 mm): ""
+*fr.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*fr.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*fr.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*fr.PageSize EnvDL/Env. DL (110 x 220 mm): ""
+*fr.PageSize EnvC5/Env. C5 (162 x 229 mm): ""
+*fr.Translation Resolution/Résolution: ""
+*fr.Resolution 600dpi/600 ppp: ""
+*fr.Translation InputSlot/Input Tray: ""
+*fr.InputSlot AutoSelect/Sélection magasin auto: ""
+*fr.InputSlot Manual/Bypass: ""
+*fr.InputSlot Tray1/Magasin 1: ""
+*fr.Translation Duplex/Duplex: ""
+*fr.Duplex None/OFF: ""
+*fr.Duplex DuplexNoTumble/Reliure bord long: ""
+*fr.Duplex DuplexTumble/Reliure bord court: ""
+*it.Translation Manufacturer/RICOH: ""
+*it.Translation ModelName/RICOH SP 325SNw: ""
+*it.Translation ShortNickName/SP 325SNw: ""
+*it.Translation NickName/RICOH SP 325SNw: ""
+*it.Translation PageSize/Dimensione media: ""
+*it.PageSize A4/A4 (210 x 297 mm): ""
+*it.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*it.PageSize A5/A5 (148 x 210 mm): ""
+*it.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*it.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*it.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*it.PageSize EnvDL/Busta DL (110 x 220 mm): ""
+*it.PageSize EnvC5/Busta C5 (162 x 229 mm): ""
+*it.Translation Resolution/Risoluzione: ""
+*it.Resolution 600dpi/600 dpi: ""
+*it.Translation InputSlot/Input Tray: ""
+*it.InputSlot AutoSelect/Selezione automatica vassoio: ""
+*it.InputSlot Manual/Vassoio bypass: ""
+*it.InputSlot Tray1/Vassoio 1: ""
+*it.Translation Duplex/Duplex: ""
+*it.Duplex None/Disattivo: ""
+*it.Duplex DuplexNoTumble/Rilegatura laterale: ""
+*it.Duplex DuplexTumble/Rilegatura superiore: ""
+*es.Translation Manufacturer/RICOH: ""
+*es.Translation ModelName/RICOH SP 325SNw: ""
+*es.Translation ShortNickName/SP 325SNw: ""
+*es.Translation NickName/RICOH SP 325SNw: ""
+*es.Translation PageSize/Tamaño de papel: ""
+*es.PageSize A4/A4 (210 x 297 mm): ""
+*es.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*es.PageSize A5/A5 (148 x 210 mm): ""
+*es.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*es.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*es.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*es.PageSize EnvDL/Sobre DL (110 x 220 mm): ""
+*es.PageSize EnvC5/Sobre C5 (162 x 229 mm): ""
+*es.Translation Resolution/Resolución: ""
+*es.Resolution 600dpi/600 ppp: ""
+*es.Translation InputSlot/Input Tray: ""
+*es.InputSlot AutoSelect/Selección auto bandeja: ""
+*es.InputSlot Manual/Bandeja bypass: ""
+*es.InputSlot Tray1/Bandeja 1: ""
+*es.Translation Duplex/Duplex: ""
+*es.Duplex None/Desactivado: ""
+*es.Duplex DuplexNoTumble/Encuadernación borde largo: ""
+*es.Duplex DuplexTumble/Encuadernación borde corto: ""
+*nl.Translation Manufacturer/RICOH: ""
+*nl.Translation ModelName/RICOH SP 325SNw: ""
+*nl.Translation ShortNickName/SP 325SNw: ""
+*nl.Translation NickName/RICOH SP 325SNw: ""
+*nl.Translation PageSize/Materiaalgrootte: ""
+*nl.PageSize A4/A4 (210 x 297 mm): ""
+*nl.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*nl.PageSize A5/A5 (148 x 210 mm): ""
+*nl.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*nl.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*nl.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*nl.PageSize EnvDL/DL Env (110 x 220 mm): ""
+*nl.PageSize EnvC5/C5 Env (162 x 229 mm): ""
+*nl.Translation Resolution/Resolutie: ""
+*nl.Resolution 600dpi/600dpi: ""
+*nl.Translation InputSlot/Input Tray: ""
+*nl.InputSlot AutoSelect/Automatische ladeselectie: ""
+*nl.InputSlot Manual/Handinvoer: ""
+*nl.InputSlot Tray1/Lade 1: ""
+*nl.Translation Duplex/Duplex: ""
+*nl.Duplex None/Uit: ""
+*nl.Duplex DuplexNoTumble/Lange rand inbinden: ""
+*nl.Duplex DuplexTumble/Korte rand inbinden: ""
+*sv.Translation Manufacturer/RICOH: ""
+*sv.Translation ModelName/RICOH SP 325SNw: ""
+*sv.Translation ShortNickName/SP 325SNw: ""
+*sv.Translation NickName/RICOH SP 325SNw: ""
+*sv.Translation PageSize/Mediestorlek: ""
+*sv.PageSize A4/A4 (210 x 297 mm): ""
+*sv.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*sv.PageSize A5/A5 (148 x 210 mm): ""
+*sv.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*sv.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*sv.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*sv.PageSize EnvDL/DL-kuv (110 x 220 mm): ""
+*sv.PageSize EnvC5/C5-kuv (162 x 229 mm): ""
+*sv.Translation Resolution/Upplösning: ""
+*sv.Resolution 600dpi/600 dpi: ""
+*sv.Translation InputSlot/Input Tray: ""
+*sv.InputSlot AutoSelect/Autoval: ""
+*sv.InputSlot Manual/Sidoinmatningsfack: ""
+*sv.InputSlot Tray1/Kassett 1: ""
+*sv.Translation Duplex/Duplex: ""
+*sv.Duplex None/Av: ""
+*sv.Duplex DuplexNoTumble/Bindning långsida: ""
+*sv.Duplex DuplexTumble/Bindning kortsida: ""
+*da.Translation Manufacturer/RICOH: ""
+*da.Translation ModelName/RICOH SP 325SNw: ""
+*da.Translation ShortNickName/SP 325SNw: ""
+*da.Translation NickName/RICOH SP 325SNw: ""
+*da.Translation PageSize/Mediestørrelse: ""
+*da.PageSize A4/A4 (210 x 297 mm): ""
+*da.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*da.PageSize A5/A5 (148 x 210 mm): ""
+*da.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*da.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*da.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*da.PageSize EnvDL/DL-kuv. (110 x 220 mm): ""
+*da.PageSize EnvC5/C5-kuv. (162 x 229 mm): ""
+*da.Translation Resolution/Opløsning: ""
+*da.Resolution 600dpi/600 dpi: ""
+*da.Translation InputSlot/Input Tray: ""
+*da.InputSlot AutoSelect/Automatisk kassettevalg: ""
+*da.InputSlot Manual/Bypassbakke: ""
+*da.InputSlot Tray1/Kassette 1: ""
+*da.Translation Duplex/Duplex: ""
+*da.Duplex None/Fra: ""
+*da.Duplex DuplexNoTumble/Indbinding på lang led: ""
+*da.Duplex DuplexTumble/Indbinding på kort led: ""
+*no.Translation Manufacturer/RICOH: ""
+*no.Translation ModelName/RICOH SP 325SNw: ""
+*no.Translation ShortNickName/SP 325SNw: ""
+*no.Translation NickName/RICOH SP 325SNw: ""
+*no.Translation PageSize/Papirstørrelse: ""
+*no.PageSize A4/A4 (210 x 297 mm): ""
+*no.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*no.PageSize A5/A5 (148 x 210 mm): ""
+*no.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*no.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*no.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*no.PageSize EnvDL/DL-konv. (110 x 220 mm): ""
+*no.PageSize EnvC5/C5-konv. (162 x 229 mm): ""
+*no.Translation Resolution/Oppløsning: ""
+*no.Resolution 600dpi/600 dpi: ""
+*no.Translation InputSlot/Input Tray: ""
+*no.InputSlot AutoSelect/Automatisk magasinvalg: ""
+*no.InputSlot Manual/Multiarkmater: ""
+*no.InputSlot Tray1/Magasin 1: ""
+*no.Translation Duplex/Duplex: ""
+*no.Duplex None/Av: ""
+*no.Duplex DuplexNoTumble/Langsideinnbinding: ""
+*no.Duplex DuplexTumble/Kortsideinnbinding: ""
+*pl.Translation Manufacturer/RICOH: ""
+*pl.Translation ModelName/RICOH SP 325SNw: ""
+*pl.Translation ShortNickName/SP 325SNw: ""
+*pl.Translation NickName/RICOH SP 325SNw: ""
+*pl.Translation PageSize/Rozmiar nośnika: ""
+*pl.PageSize A4/A4 (210 x 297 mm): ""
+*pl.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*pl.PageSize A5/A5 (148 x 210 mm): ""
+*pl.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*pl.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*pl.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*pl.PageSize EnvDL/Kop.DL (110 x 220 mm): ""
+*pl.PageSize EnvC5/Kop.C5 (162 x 229 mm): ""
+*pl.Translation Resolution/Rozdzielczość: ""
+*pl.Resolution 600dpi/600dpi: ""
+*pl.Translation InputSlot/Input Tray: ""
+*pl.InputSlot AutoSelect/Automatyczny wybór kasety: ""
+*pl.InputSlot Manual/Taca ręczna: ""
+*pl.InputSlot Tray1/Kaseta 1: ""
+*pl.Translation Duplex/Duplex: ""
+*pl.Duplex None/Wyłączone: ""
+*pl.Duplex DuplexNoTumble/Oprawianie długiej krawędzi: ""
+*pl.Duplex DuplexTumble/Oprawianie krótkiej krawędzi: ""
+*pt.Translation Manufacturer/RICOH: ""
+*pt.Translation ModelName/RICOH SP 325SNw: ""
+*pt.Translation ShortNickName/SP 325SNw: ""
+*pt.Translation NickName/RICOH SP 325SNw: ""
+*pt.Translation PageSize/Tamanho de Mídia: ""
+*pt.PageSize A4/A4 (210 x 297 mm): ""
+*pt.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*pt.PageSize A5/A5 (148 x 210 mm): ""
+*pt.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*pt.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*pt.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*pt.PageSize EnvDL/Env DL (110 x 220 mm): ""
+*pt.PageSize EnvC5/Env C5 (162 x 229 mm): ""
+*pt.Translation Resolution/Resolução: ""
+*pt.Resolution 600dpi/600ppp: ""
+*pt.Translation InputSlot/Input Tray: ""
+*pt.InputSlot AutoSelect/Seleção automática de bandeja: ""
+*pt.InputSlot Manual/Bandeja de alimentação manual: ""
+*pt.InputSlot Tray1/Bandeja 1: ""
+*pt.Translation Duplex/Duplex: ""
+*pt.Duplex None/Desligado: ""
+*pt.Duplex DuplexNoTumble/Encadernação na horizontal: ""
+*pt.Duplex DuplexTumble/Encadernação na vertical: ""
+*cs.Translation Manufacturer/RICOH: ""
+*cs.Translation ModelName/RICOH SP 325SNw: ""
+*cs.Translation ShortNickName/SP 325SNw: ""
+*cs.Translation NickName/RICOH SP 325SNw: ""
+*cs.Translation PageSize/Velikost média: ""
+*cs.PageSize A4/A4 (210×297 mm): ""
+*cs.PageSize Letter/Letter (8<2E>5<22>×11<22>): ""
+*cs.PageSize A5/A5 (148×210 mm): ""
+*cs.PageSize Legal/Legal (8<2E>5<22>×14<22>): ""
+*cs.PageSize Env10/Com10 (104<2E>8×241<2E>3 mm): ""
+*cs.PageSize EnvMonarch/Monarch (98<2E>4×190<2E>5 mm): ""
+*cs.PageSize EnvDL/DL Env (110×220 mm): ""
+*cs.PageSize EnvC5/C5 Env (162×229 mm): ""
+*cs.Translation Resolution/Stav: ""
+*cs.Resolution 600dpi/600 DPI: ""
+*cs.Translation InputSlot/Input Tray: ""
+*cs.InputSlot AutoSelect/Aut. výběr zásobníku: ""
+*cs.InputSlot Manual/Boční zásobník: ""
+*cs.InputSlot Tray1/Zásobník 1: ""
+*cs.Translation Duplex/Duplex: ""
+*cs.Duplex None/Vyp.: ""
+*cs.Duplex DuplexNoTumble/Vazba delším okrajem: ""
+*cs.Duplex DuplexTumble/Vazba kratším okrajem: ""
+*hu.Translation Manufacturer/RICOH: ""
+*hu.Translation ModelName/RICOH SP 325SNw: ""
+*hu.Translation ShortNickName/SP 325SNw: ""
+*hu.Translation NickName/RICOH SP 325SNw: ""
+*hu.Translation PageSize/Média mérete: ""
+*hu.PageSize A4/A4 (210 x 297 mm): ""
+*hu.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*hu.PageSize A5/A5 (148 x 210 mm): ""
+*hu.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*hu.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*hu.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*hu.PageSize EnvDL/DL bor (110 x 220 mm): ""
+*hu.PageSize EnvC5/C5 bor (162 x 229 mm): ""
+*hu.Translation Resolution/Felbontás: ""
+*hu.Resolution 600dpi/600 dpi: ""
+*hu.Translation InputSlot/Input Tray: ""
+*hu.InputSlot AutoSelect/Automatikus adagolóválasztás: ""
+*hu.InputSlot Manual/Kézi adagoló: ""
+*hu.InputSlot Tray1/1. adagoló: ""
+*hu.Translation Duplex/Duplex: ""
+*hu.Duplex None/Ki: ""
+*hu.Duplex DuplexNoTumble/Kötés a hosszú élen: ""
+*hu.Duplex DuplexTumble/Kötés a rövid élen: ""
+*fi.Translation Manufacturer/RICOH: ""
+*fi.Translation ModelName/RICOH SP 325SNw: ""
+*fi.Translation ShortNickName/SP 325SNw: ""
+*fi.Translation NickName/RICOH SP 325SNw: ""
+*fi.Translation PageSize/Median koko: ""
+*fi.PageSize A4/A4 (210 x 297 mm): ""
+*fi.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*fi.PageSize A5/A5 (148 x 210 mm): ""
+*fi.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*fi.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*fi.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*fi.PageSize EnvDL/DL-kuori (110 x 220 mm): ""
+*fi.PageSize EnvC5/C5-kuori (162 x 229 mm): ""
+*fi.Translation Resolution/Tarkkuus: ""
+*fi.Resolution 600dpi/600 dpi: ""
+*fi.Translation InputSlot/Input Tray: ""
+*fi.InputSlot AutoSelect/Automaattinen kasetin valinta: ""
+*fi.InputSlot Manual/Ohisyöttötaso: ""
+*fi.InputSlot Tray1/Kasetti 1: ""
+*fi.Translation Duplex/Duplex: ""
+*fi.Duplex None/Pois: ""
+*fi.Duplex DuplexNoTumble/Pitkän sivun sidonta: ""
+*fi.Duplex DuplexTumble/Lyhyen sivun sidonta: ""
+*ru.Translation Manufacturer/RICOH: ""
+*ru.Translation ModelName/RICOH SP 325SNw: ""
+*ru.Translation ShortNickName/SP 325SNw: ""
+*ru.Translation NickName/RICOH SP 325SNw: ""
+*ru.Translation PageSize/Размер бумаги: ""
+*ru.PageSize A4/A4 (210 x 297 мм): ""
+*ru.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*ru.PageSize A5/A5 (148 x 210 мм): ""
+*ru.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*ru.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 мм): ""
+*ru.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 мм): ""
+*ru.PageSize EnvDL/Конв. DL (110 x 220 мм): ""
+*ru.PageSize EnvC5/Конв. C5 (162 x 229 мм): ""
+*ru.Translation Resolution/Разрешение: ""
+*ru.Resolution 600dpi/600dpi: ""
+*ru.Translation InputSlot/Input Tray: ""
+*ru.InputSlot AutoSelect/Автовыбор лотка: ""
+*ru.InputSlot Manual/Обходной лоток: ""
+*ru.InputSlot Tray1/Лоток 1: ""
+*ru.Translation Duplex/Duplex: ""
+*ru.Duplex None/Выкл.: ""
+*ru.Duplex DuplexNoTumble/Переплет по длинной кромке: ""
+*ru.Duplex DuplexTumble/Переплет по короткой кромке: ""
+*pt_BR.Translation Manufacturer/RICOH: ""
+*pt_BR.Translation ModelName/RICOH SP 325SNw: ""
+*pt_BR.Translation ShortNickName/SP 325SNw: ""
+*pt_BR.Translation NickName/RICOH SP 325SNw: ""
+*pt_BR.Translation PageSize/Media Size: ""
+*pt_BR.PageSize A4/A4 (210 x 297 mm): ""
+*pt_BR.PageSize Letter/Carta (8<2E>5<22> x 11<22>): ""
+*pt_BR.PageSize A5/A5 (148 x 210 mm): ""
+*pt_BR.PageSize Legal/Ofício (8<2E>5<22> x 14<22>): ""
+*pt_BR.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*pt_BR.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*pt_BR.PageSize EnvDL/Env DL (110 x 220 mm): ""
+*pt_BR.PageSize EnvC5/Env C5 (162 x 229 mm): ""
+*pt_BR.Translation Resolution/Resolution: ""
+*pt_BR.Resolution 600dpi/600dpi: ""
+*pt_BR.Translation InputSlot/Input Tray: ""
+*pt_BR.InputSlot AutoSelect/Seleção automática de bandeja: ""
+*pt_BR.InputSlot Manual/Bandeja de alimentação manual: ""
+*pt_BR.InputSlot Tray1/Bandeja 1: ""
+*pt_BR.Translation Duplex/Duplex: ""
+*pt_BR.Duplex None/Desligado: ""
+*pt_BR.Duplex DuplexNoTumble/Encadernação pela borda longa: ""
+*pt_BR.Duplex DuplexTumble/Encadernação pela borda curta: ""
+*zh_CN.Translation Manufacturer/RICOH: ""
+*zh_CN.Translation ModelName/RICOH SP 325SNw: ""
+*zh_CN.Translation ShortNickName/SP 325SNw: ""
+*zh_CN.Translation NickName/RICOH SP 325SNw: ""
+*zh_CN.Translation PageSize/介质大小: ""
+*zh_CN.PageSize A4/A4 (210 x 297 mm): ""
+*zh_CN.PageSize Letter/信纸(8<2E>5<22> x 11<22>): ""
+*zh_CN.PageSize A5/A5 (148 x 210 mm): ""
+*zh_CN.PageSize Legal/法律纸(8<2E>5<22> x 14<22>): ""
+*zh_CN.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*zh_CN.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*zh_CN.PageSize EnvDL/DL信封(110 x 220 mm): ""
+*zh_CN.PageSize EnvC5/C5信封(162 x 229 mm): ""
+*zh_CN.Translation Resolution/分辨率: ""
+*zh_CN.Resolution 600dpi/600dpi: ""
+*zh_CN.Translation InputSlot/Input Tray: ""
+*zh_CN.InputSlot AutoSelect/自动纸盘选择: ""
+*zh_CN.InputSlot Manual/手送台: ""
+*zh_CN.InputSlot Tray1/纸盘1: ""
+*zh_CN.Translation Duplex/Duplex: ""
+*zh_CN.Duplex None/关: ""
+*zh_CN.Duplex DuplexNoTumble/长边装订: ""
+*zh_CN.Duplex DuplexTumble/短边装订: ""
+*zh_TW.Translation Manufacturer/RICOH: ""
+*zh_TW.Translation ModelName/RICOH SP 325SNw: ""
+*zh_TW.Translation ShortNickName/SP 325SNw: ""
+*zh_TW.Translation NickName/RICOH SP 325SNw: ""
+*zh_TW.Translation PageSize/媒體大小: ""
+*zh_TW.PageSize A4/A4 (210 x 297 mm): ""
+*zh_TW.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*zh_TW.PageSize A5/A5 (148 x 210 mm): ""
+*zh_TW.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*zh_TW.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*zh_TW.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*zh_TW.PageSize EnvDL/DL Env (110 x 220 mm): ""
+*zh_TW.PageSize EnvC5/C5 Env (162 x 229 mm): ""
+*zh_TW.Translation Resolution/解析度: ""
+*zh_TW.Resolution 600dpi/600 dpi: ""
+*zh_TW.Translation InputSlot/Input Tray: ""
+*zh_TW.InputSlot AutoSelect/自動紙匣選擇: ""
+*zh_TW.InputSlot Manual/手送台: ""
+*zh_TW.InputSlot Tray1/紙匣1: ""
+*zh_TW.Translation Duplex/Duplex: ""
+*zh_TW.Duplex None/關閉: ""
+*zh_TW.Duplex DuplexNoTumble/長邊裝訂: ""
+*zh_TW.Duplex DuplexTumble/短邊裝訂: ""
+*tr.Translation Manufacturer/RICOH: ""
+*tr.Translation ModelName/RICOH SP 325SNw: ""
+*tr.Translation ShortNickName/SP 325SNw: ""
+*tr.Translation NickName/RICOH SP 325SNw: ""
+*tr.Translation PageSize/Ortam Büyüklüğü: ""
+*tr.PageSize A4/A4 (210 x 297 mm): ""
+*tr.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*tr.PageSize A5/A5 (148 x 210 mm): ""
+*tr.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*tr.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 mm): ""
+*tr.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 mm): ""
+*tr.PageSize EnvDL/DL Zarf (110 x 220 mm): ""
+*tr.PageSize EnvC5/C5 Zarf (162 x 229 mm): ""
+*tr.Translation Resolution/Çözünürlük: ""
+*tr.Resolution 600dpi/600 dpi: ""
+*tr.Translation InputSlot/Input Tray: ""
+*tr.InputSlot AutoSelect/Oto Tepsi Seçimi: ""
+*tr.InputSlot Manual/Bypass Tepsisi: ""
+*tr.InputSlot Tray1/Kaset 1: ""
+*tr.Translation Duplex/Duplex: ""
+*tr.Duplex None/Kapalı: ""
+*tr.Duplex DuplexNoTumble/Uzun Kenar Ciltleme: ""
+*tr.Duplex DuplexTumble/Kısa Kenar Ciltleme: ""
+*kk.Translation Manufacturer/RICOH: ""
+*kk.Translation ModelName/RICOH SP 325SNw: ""
+*kk.Translation ShortNickName/SP 325SNw: ""
+*kk.Translation NickName/RICOH SP 325SNw: ""
+*kk.Translation PageSize/Media Size: ""
+*kk.PageSize A4/A4 (210 x 297 мм): ""
+*kk.PageSize Letter/Letter (8<2E>5<22> x 11<22>): ""
+*kk.PageSize A5/A5 (148 x 210 мм): ""
+*kk.PageSize Legal/Legal (8<2E>5<22> x 14<22>): ""
+*kk.PageSize Env10/Com10 (104<2E>8 x 241<2E>3 мм): ""
+*kk.PageSize EnvMonarch/Monarch (98<2E>4 x 190<2E>5 мм): ""
+*kk.PageSize EnvDL/DL Env (110 x 220 мм): ""
+*kk.PageSize EnvC5/C5 Env (162 x 229 мм): ""
+*kk.Translation Resolution/Resolution: ""
+*kk.Resolution 600dpi/600dpi: ""
+*kk.Translation InputSlot/Input Tray: ""
+*kk.InputSlot AutoSelect/Науаны автоматты түрде таңдау: ""
+*kk.InputSlot Manual/Айналма науасы: ""
+*kk.InputSlot Tray1/1-науа: ""
+*kk.Translation Duplex/Duplex: ""
+*kk.Duplex None/Өшірулі: ""
+*kk.Duplex DuplexNoTumble/Ұзын жиекті түптеу: ""
+*kk.Duplex DuplexTumble/Қысқа жиекті түптеу: ""
+*ar.Translation Manufacturer/RICOH: ""
+*ar.Translation ModelName/RICOH SP 325SNw: ""
+*ar.Translation ShortNickName/SP 325SNw: ""
+*ar.Translation NickName/RICOH SP 325SNw: ""
+*ar.Translation PageSize/حجم الوسائط: ""
+*ar.PageSize A4/‮4A ‮(210 × 297 مم): ""
+*ar.PageSize Letter/‮Letter (8.5" x 11"): ""
+*ar.PageSize A5/A5 (148 × 210 مم): ""
+*ar.PageSize Legal/‮Legal (8.5" x 14"): ""
+*ar.PageSize Env10/‮‪Com10‬ (104.8 x 241.3 مم): ""
+*ar.PageSize EnvMonarch/‮Monarch (98.4 x 190.5 مم): ""
+*ar.PageSize EnvDL/‮DL Env (110 x 220 مم): ""
+*ar.PageSize EnvC5/C5 Env (162 × 229 مم): ""
+*ar.Translation Resolution/الحل: ""
+*ar.Resolution 600dpi/‏٦٠٠ نقطة في البوصة: ""
+*ar.Translation InputSlot/Input Tray: ""
+*ar.InputSlot AutoSelect/تحديد الدرج تلقائيًا: ""
+*ar.InputSlot Manual/درج جانبي: ""
+*ar.InputSlot Tray1/درج 1: ""
+*ar.Translation Duplex/Duplex: ""
+*ar.Duplex None/إيقاف: ""
+*ar.Duplex DuplexNoTumble/رباط حافة طويلة: ""
+*ar.Duplex DuplexTumble/رباط حافة قصيرة: ""
+*DefaultFont: Courier
+*Font AvantGarde-Book: Standard "(1.05)" Standard ROM
+*Font AvantGarde-BookOblique: Standard "(1.05)" Standard ROM
+*Font AvantGarde-Demi: Standard "(1.05)" Standard ROM
+*Font AvantGarde-DemiOblique: Standard "(1.05)" Standard ROM
+*Font Bookman-Demi: Standard "(1.05)" Standard ROM
+*Font Bookman-DemiItalic: Standard "(1.05)" Standard ROM
+*Font Bookman-Light: Standard "(1.05)" Standard ROM
+*Font Bookman-LightItalic: Standard "(1.05)" Standard ROM
+*Font Courier: Standard "(1.05)" Standard ROM
+*Font Courier-Bold: Standard "(1.05)" Standard ROM
+*Font Courier-BoldOblique: Standard "(1.05)" Standard ROM
+*Font Courier-Oblique: Standard "(1.05)" Standard ROM
+*Font Helvetica: Standard "(1.05)" Standard ROM
+*Font Helvetica-Bold: Standard "(1.05)" Standard ROM
+*Font Helvetica-BoldOblique: Standard "(1.05)" Standard ROM
+*Font Helvetica-Narrow: Standard "(1.05)" Standard ROM
+*Font Helvetica-Narrow-Bold: Standard "(1.05)" Standard ROM
+*Font Helvetica-Narrow-BoldOblique: Standard "(1.05)" Standard ROM
+*Font Helvetica-Narrow-Oblique: Standard "(1.05)" Standard ROM
+*Font Helvetica-Oblique: Standard "(1.05)" Standard ROM
+*Font NewCenturySchlbk-Bold: Standard "(1.05)" Standard ROM
+*Font NewCenturySchlbk-BoldItalic: Standard "(1.05)" Standard ROM
+*Font NewCenturySchlbk-Italic: Standard "(1.05)" Standard ROM
+*Font NewCenturySchlbk-Roman: Standard "(1.05)" Standard ROM
+*Font Palatino-Bold: Standard "(1.05)" Standard ROM
+*Font Palatino-BoldItalic: Standard "(1.05)" Standard ROM
+*Font Palatino-Italic: Standard "(1.05)" Standard ROM
+*Font Palatino-Roman: Standard "(1.05)" Standard ROM
+*Font Symbol: Special "(001.005)" Special ROM
+*Font Times-Bold: Standard "(1.05)" Standard ROM
+*Font Times-BoldItalic: Standard "(1.05)" Standard ROM
+*Font Times-Italic: Standard "(1.05)" Standard ROM
+*Font Times-Roman: Standard "(1.05)" Standard ROM
+*Font ZapfChancery-MediumItalic: Standard "(1.05)" Standard ROM
+*Font ZapfDingbats: Special "(001.005)" Special ROM
+*% End of RICOH SP 325SNw.ppd, 31808 bytes.

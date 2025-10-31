@@ -1,0 +1,40 @@
+{
+  "areas": [
+    {
+      "name": "总部办公区",
+      "printers": [
+        {
+          "name": "前台_HP_LaserJet",
+          "path": "\\\\hq-server\\HP_LaserJet"
+        },
+        {
+          "name": "会议室_Color",
+          "path": "\\\\hq-server\\Meeting_Color"
+        }
+      ]
+    },
+    {
+      "name": "财务中心",
+      "printers": [
+        {
+          "name": "财务_LaserJet",
+          "path": "\\\\fin-server\\Finance_LJ"
+        },
+        {
+          "name": "报表打印机",
+          "path": "\\\\fin-server\\ReportPrinter"
+        }
+      ]
+    },
+    {
+      "name": "研发部",
+      "printers": [
+        {
+          "name": "开发组打印机",
+          "path": "\\\\dev-server\\DevPrinter"
+        }
+      ]
+    }
+  ]
+}
+

@@ -1,0 +1,8 @@
+# 此目录用于存放应用图标
+# 图标文件应包含：
+# - icon.ico (Windows)
+# - icon.icns (macOS)
+# - 32x32.png
+# - 128x128.png
+# - 128x128@2x.png
+

@@ -1,0 +1,33 @@
+[package]
+name = "easy-printer"
+version = "1.0.0"
+description = "内网打印机助手"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "http-request", "shell-execute"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+encoding_rs = "0.8"
+
+# Windows 特定的依赖
+# 注意：由于我们使用 PowerShell 命令而不是直接调用 Windows API，
+# 实际上不需要这些 Windows features
+# 如果以后需要直接使用 Windows API，可以使用以下配置：
+# [target.'cfg(windows)'.dependencies]
+# windows = { version = "0.52", features = [
+#     "Win32_Foundation",
+#     "Win32_System_SystemServices"
+# ] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
