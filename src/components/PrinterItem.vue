@@ -21,7 +21,14 @@
               已安装
             </span>
           </div>
-          <p class="text-sm text-gray-500 truncate mt-1">{{ printer.path }}</p>
+          <!-- 打印机型号 -->
+          <p v-if="printer.model" class="text-sm text-blue-600 font-medium truncate mt-1">
+            {{ printer.model }}
+          </p>
+          <!-- 打印机路径（IP地址） -->
+          <p class="text-sm text-gray-500 truncate" :class="{'mt-0.5': printer.model, 'mt-1': !printer.model}">
+            {{ printer.path }}
+          </p>
         </div>
       </div>
     </div>
@@ -30,7 +37,7 @@
     <div class="flex-shrink-0 ml-4">
       <button
         v-if="!isInstalled"
-        @click="$emit('install')"
+        @click="handleInstall"
         :disabled="installing"
         class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
       >
@@ -73,8 +80,10 @@ export default {
   },
   methods: {
     handleInstall() {
+      console.log('PrinterItem: 点击安装按钮', this.printer)
       this.installing = true
-      this.$emit('install')
+      // 传递打印机对象给父组件
+      this.$emit('install', this.printer)
     }
   }
 }

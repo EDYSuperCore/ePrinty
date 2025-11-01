@@ -2,7 +2,19 @@
   <div class="flex flex-col h-screen bg-gray-50">
     <!-- 顶部标题 -->
     <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
-      <h1 class="text-2xl font-bold text-gray-800">易点云打印机安装小精灵</h1>
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-800">易点云打印机安装小精灵</h1>
+        <!-- 帮助按钮：IT热线 -->
+        <button
+          @click="openDingTalk"
+          class="flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+          title="IT热线"
+        >
+          <!-- 钉钉图标 -->
+          <img :src="dingtalkIcon" alt="钉钉" class="w-5 h-5 object-contain" />
+          <span class="font-medium">IT热线</span>
+        </button>
+      </div>
     </header>
 
     <!-- 主体内容 -->
@@ -180,7 +192,8 @@ export default {
       installedPrinters: [],
       selectedAreaIndex: null, // 当前选中的办公区索引
       statusMessage: '',
-      statusType: 'info' // 'info', 'success', 'error'
+      statusType: 'info', // 'info', 'success', 'error'
+      dingtalkIcon: '/dingtalk_icon.png' // 钉钉图标路径（从 public 目录）
     }
   },
   computed: {
@@ -283,32 +296,70 @@ export default {
     async refresh() {
       await this.loadData()
     },
-    async handleInstall(printer) {
-      this.statusMessage = `正在安装 ${printer.name}...`
-      this.statusType = 'info'
+            async handleInstall(printer) {
+              console.log('开始安装打印机:', printer)
+              this.statusMessage = `正在安装 ${printer.name}...`
+              this.statusType = 'info'
 
+              try {
+                // 传递打印机名称和路径
+                console.log('调用 install_printer:', { name: printer.name, path: printer.path })
+                const result = await invoke('install_printer', { 
+                  name: printer.name,
+                  path: printer.path 
+                })
+                
+                console.log('安装结果:', result)
+                
+                if (result.success) {
+                  // 显示安装方式和消息
+                  const method = result.method || '未知'
+                  this.statusMessage = `${result.message} [方式: ${method}]`
+                  this.statusType = 'success'
+                  // 重新获取已安装的打印机列表
+                  try {
+                    this.installedPrinters = await invoke('list_printers')
+                    console.log('已更新打印机列表:', this.installedPrinters)
+                  } catch (e) {
+                    console.error('获取打印机列表失败:', e)
+                  }
+                } else {
+                  // 显示安装方式和错误消息
+                  const method = result.method || '未知'
+                  this.statusMessage = `${result.message} [方式: ${method}]`
+                  this.statusType = 'error'
+                }
+              } catch (err) {
+                console.error('安装失败:', err)
+                this.statusMessage = `安装失败: ${err}`
+                this.statusType = 'error'
+              }
+            },
+    async openDingTalk() {
       try {
-        // 传递打印机名称和路径
-        const result = await invoke('install_printer', { 
-          name: printer.name,
-          path: printer.path 
-        })
+        // 钉钉 URL scheme
+        // 格式: dingtalk://dingtalkclient/action/sendmsg?dingtalk_id=钉钉号
+        // 
+        // 如何获取钉钉号：
+        // 1. 打开钉钉应用，点击目标联系人的头像
+        // 2. 在个人信息页面下拉，找到"钉钉号"
+        // 3. 将钉钉号替换到下面的 URL 中
         
-        if (result.success) {
-          this.statusMessage = result.message
-          this.statusType = 'success'
-          // 重新获取已安装的打印机列表
-          try {
-            this.installedPrinters = await invoke('list_printers')
-          } catch (e) {
-            console.error('获取打印机列表失败:', e)
-          }
-        } else {
-          this.statusMessage = result.message
-          this.statusType = 'error'
-        }
+        const dingTalkId = 'plajnt7'
+        const dingTalkUrl = `dingtalk://dingtalkclient/action/sendmsg?dingtalk_id=${dingTalkId}`
+        
+        console.log('打开钉钉聊天:', dingTalkUrl)
+        this.statusMessage = '正在打开钉钉...'
+        this.statusType = 'info'
+        
+        // 使用 Rust 后端命令打开 URL scheme
+        await invoke('open_url', { url: dingTalkUrl })
+        
+        this.statusMessage = '钉钉已打开'
+        this.statusType = 'success'
       } catch (err) {
-        this.statusMessage = `安装失败: ${err}`
+        console.error('打开钉钉失败:', err)
+        this.statusMessage = `无法打开钉钉: ${err}。请手动打开钉钉并联系IT热线`
         this.statusType = 'error'
       }
     }

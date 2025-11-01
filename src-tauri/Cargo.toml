@@ -11,12 +11,15 @@ edition = "2021"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = [ "http-request", "shell-execute"] }
+tauri = { version = "1.5", features = [ "shell-open", "http-request", "shell-execute"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 encoding_rs = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase"] }
 
 # Windows 特定的依赖
 # 注意：由于我们使用 PowerShell 命令而不是直接调用 Windows API，
