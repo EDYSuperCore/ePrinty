@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "areas": [
     {
       "name": "北京易点云大厦A座一楼",
@@ -7,22 +7,26 @@
         {
           "name": "大厦A座一楼 彩色打印机",
           "path": "\\\\192.168.20.65",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         },
         {
           "name": "大厦A座一楼 前台",
           "path": "\\\\192.168.20.11",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         },
         {
           "name": "大厦A座一楼 客服中心",
           "path": "\\\\192.168.14.21",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         },
         {
           "name": "大厦A座一楼 财务部",
           "path": "\\\\192.168.20.15",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         }
       ]
     },
@@ -32,7 +36,8 @@
         {
           "name": "大厦A座二楼 打印机",
           "path": "\\\\192.168.63.7",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         }
       ]
     },
@@ -42,7 +47,8 @@
         {
           "name": "大厦A座 三楼打印机",
           "path": "\\\\192.168.86.2",
-          "model": "HP LaserJet MFP M227-M231 PCL-6 (V4)"
+          "model": "HP LaserJet MFP M227-M231 PCL-6 (V4)",
+          "driver_path": "drivers/HP 227/hpsw642a4_x64.inf"
         }
       ]
     },
@@ -52,12 +58,14 @@
         {
           "name": "大厦B座 前台一楼",
           "path": "\\\\192.168.20.5",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf"
         },
         {
           "name": "大厦B座 招聘部一楼",
           "path": "\\\\192.168.20.20",
-          "model": "RICOH SP 325SNw PCL 6"
+          "model": "RICOH SP 325SNw PCL 6",
+          "driver_path": "drivers/SP 325/RXE6E.inf" 
         }
       ]
     }

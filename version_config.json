@@ -1,0 +1,42 @@
+{
+  "app_name": "易点云打印机安装小精灵",
+  "app_version": "1.1.0",
+  "build_number": 1,
+  "release_date": "2024-01-15",
+  "update_url": "https://p.edianyun.icu/updates/easyPrinter-1.1.0.exe",
+  "update_type": "manual",
+  "update_description": "版本 1.1.0 更新内容：\n- 新增动态测试页生成功能\n- 优化打印机安装流程\n- 修复打印测试页错误\n- 改进用户界面",
+  "changelog": [
+    {
+      "version": "1.1.0",
+      "date": "2024-01-15",
+      "changes": [
+        "新增动态测试页生成功能",
+        "优化打印机安装流程",
+        "修复打印测试页错误",
+        "改进用户界面"
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2024-01-01",
+      "changes": [
+        "初始版本发布",
+        "支持打印机安装",
+        "支持打印机列表查看"
+      ]
+    }
+  ],
+  "force_update": false,
+  "min_supported_version": "1.0.0",
+  "download_size": "5.2 MB",
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "abc123def456..."
+  },
+  "printer_config": {
+    "version": "1.0.0",
+    "url": "https://p.edianyun.icu/printer_config.json"
+  }
+}
+

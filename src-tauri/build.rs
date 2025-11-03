@@ -6,10 +6,36 @@ fn main() {
     // 先执行 tauri_build
     tauri_build::build();
     
+    // 嵌入 Windows manifest（请求管理员权限）
+    embed_windows_manifest();
+    
     // 将配置文件复制到输出目录（release/debug），使其与可执行文件在同一目录
     // 注意：这个操作是可选的，如果失败不会阻止构建
     // 注意：VBS 脚本已经通过 include_str! 嵌入到 exe 中，不需要复制
     copy_config_file();
+}
+
+#[cfg(windows)]
+fn embed_windows_manifest() {
+    // 注意：由于 Tauri 已经在构建时处理了资源，我们不能在 build.rs 中使用 winres
+    // 因为它会与 Tauri 的资源产生冲突（重复的 VERSION 资源）
+    // 解决方案：在构建后使用 PowerShell 脚本嵌入 manifest
+    
+    let manifest_path = Path::new("app.manifest");
+    
+    if manifest_path.exists() {
+        println!("cargo:warning=检测到 Windows manifest 文件: {:?}", manifest_path);
+        println!("cargo:warning=由于 Tauri 的资源处理，manifest 将在构建后手动嵌入");
+        println!("cargo:warning=请使用 PowerShell 脚本 embed_manifest.ps1 嵌入 manifest");
+        println!("cargo:warning=或者右键点击 exe，选择'属性' -> '兼容性' -> '以管理员身份运行此程序'");
+    } else {
+        println!("cargo:warning=Windows manifest 文件未找到: {:?}", manifest_path);
+    }
+}
+
+#[cfg(not(windows))]
+fn embed_windows_manifest() {
+    // 非 Windows 平台不需要 manifest
 }
 
 fn copy_config_file() {
