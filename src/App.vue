@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-screen bg-gray-50">
+  <div class="flex flex-col h-screen bg-gray-50" @contextmenu.prevent>
     <!-- 顶部标题 -->
     <header class="bg-white border-b border-gray-200 px-6 py-4 backdrop-blur-xl bg-white/80">
       <div class="flex items-center justify-between">
@@ -289,6 +289,78 @@
         </div>
       </div>
     </div>
+
+    <!-- 配置更新提示对话框 -->
+    <div 
+      v-if="showUpdateDialog" 
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
+      @click.self="cancelUpdate"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+        <!-- 对话框标题 -->
+        <div class="bg-gray-50 border-b border-gray-200 px-6 py-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900">配置更新可用</h3>
+            <button
+              @click="cancelUpdate"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 对话框内容 -->
+        <div class="px-6 py-6">
+          <div class="flex items-center space-x-4 mb-4">
+            <div class="bg-blue-100 rounded-full p-3">
+              <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <h4 class="text-base font-semibold text-gray-900 mb-1">检测到远程配置更新</h4>
+              <p class="text-sm text-gray-600">是否下载并应用最新配置？</p>
+            </div>
+          </div>
+
+          <div class="bg-gray-50 rounded-lg p-4 mb-4">
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-gray-500">本地版本</span>
+                <span class="text-sm font-medium text-gray-700">{{ localVersion }}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-gray-500">远程版本</span>
+                <span class="text-sm font-medium text-blue-600">{{ remoteVersion }}</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-gray-500 mb-4">更新后会自动刷新打印机列表</p>
+        </div>
+
+        <!-- 对话框底部 -->
+        <div class="bg-gray-50 border-t border-gray-200 px-6 py-4">
+          <div class="flex items-center space-x-3">
+            <button
+              @click="cancelUpdate"
+              class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmUpdate"
+              class="flex-1 px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md transition-colors"
+            >
+              更新
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -312,7 +384,11 @@ export default {
       statusType: 'info', // 'info', 'success', 'error'
       dingtalkIcon: '/dingtalk_icon.png', // 钉钉图标路径（从 public 目录）
       showHelp: false, // 显示帮助对话框
-      version: '1.0.0' // 软件版本号
+      version: '1.1.0', // 软件版本号
+      showUpdateDialog: false, // 显示更新对话框
+      pendingRemoteConfig: null, // 待更新的远程配置
+      localVersion: '', // 本地版本号
+      remoteVersion: '' // 远程版本号
     }
   },
   computed: {
@@ -380,19 +456,30 @@ export default {
         // 配置加载成功
         this.config = configResult.config
         
-        // 显示配置来源和远程加载状态
-        if (configResult.source === 'local') {
-          if (configResult.remote_error) {
-            // 使用本地配置，但远程加载失败（只提示，不影响使用）
-            this.statusMessage = `已加载本地配置（远程更新失败：${configResult.remote_error}）`
-            this.statusType = 'info' // 使用 info 而不是 error，因为不影响使用
+        // 检查是否有远程更新
+        if (configResult.has_remote_update && configResult.remote_config) {
+          // 有远程更新，显示更新提示对话框
+          this.showUpdateDialog = true
+          this.pendingRemoteConfig = configResult.remote_config
+          this.localVersion = configResult.local_version || '未知'
+          this.remoteVersion = configResult.remote_version || '未知'
+          this.statusMessage = '检测到远程配置更新，请确认是否更新'
+          this.statusType = 'info'
+        } else {
+          // 显示配置来源和远程加载状态
+          if (configResult.source === 'local') {
+            if (configResult.remote_error) {
+              // 使用本地配置，但远程加载失败（只提示，不影响使用）
+              this.statusMessage = `已加载本地配置（远程更新失败：${configResult.remote_error}）`
+              this.statusType = 'info' // 使用 info 而不是 error，因为不影响使用
+            } else {
+              this.statusMessage = '已加载本地配置'
+              this.statusType = 'success'
+            }
           } else {
-            this.statusMessage = '已加载本地配置'
+            this.statusMessage = '已加载远程配置'
             this.statusType = 'success'
           }
-        } else {
-          this.statusMessage = '已加载远程配置'
-          this.statusType = 'success'
         }
 
         this.installedPrinters = printers || []
@@ -481,6 +568,54 @@ export default {
         this.statusMessage = `无法打开钉钉: ${err}。请手动打开钉钉并联系IT热线`
         this.statusType = 'error'
       }
+    },
+    async confirmUpdate() {
+      // 确认更新，调用后端保存远程配置
+      try {
+        this.statusMessage = '正在更新配置...'
+        this.statusType = 'info'
+        this.showUpdateDialog = false
+        
+        const result = await invoke('confirm_update_config')
+        
+        if (result && result.config) {
+          // 更新成功，重新加载数据
+          this.config = result.config
+          this.statusMessage = '配置已更新，正在刷新...'
+          this.statusType = 'success'
+          
+          // 重置状态
+          this.pendingRemoteConfig = null
+          
+          // 重新加载已安装打印机列表
+          try {
+            this.installedPrinters = await invoke('list_printers')
+            // 如果有选中的办公区，保持选中状态
+            if (this.selectedAreaIndex !== null && this.config && this.config.areas) {
+              // 确保选中的索引仍然有效
+              if (this.selectedAreaIndex >= this.config.areas.length) {
+                this.selectedAreaIndex = 0
+              }
+            }
+            this.statusMessage = '配置更新成功'
+          } catch (e) {
+            console.error('获取打印机列表失败:', e)
+          }
+        }
+      } catch (err) {
+        console.error('更新配置失败:', err)
+        this.statusMessage = `更新失败: ${err}`
+        this.statusType = 'error'
+        // 显示错误时，可以重新显示更新对话框
+        this.showUpdateDialog = true
+      }
+    },
+    cancelUpdate() {
+      // 取消更新
+      this.showUpdateDialog = false
+      this.pendingRemoteConfig = null
+      this.statusMessage = '已取消更新'
+      this.statusType = 'info'
     }
   }
 }

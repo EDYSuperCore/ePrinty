@@ -36,18 +36,20 @@ fn decode_windows_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PrinterConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>, // 配置文件版本号（可选，兼容旧版本）
     areas: Vec<Area>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Area {
     name: String,
     printers: Vec<Printer>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Printer {
     name: String,
     path: String,
@@ -67,10 +69,14 @@ struct LoadConfigResult {
     config: PrinterConfig,
     source: String, // "local" 或 "remote"
     remote_error: Option<String>,
+    has_remote_update: bool, // 是否有远程更新可用
+    remote_config: Option<PrinterConfig>, // 远程配置（如果有更新）
+    local_version: Option<String>, // 本地版本号
+    remote_version: Option<String>, // 远程版本号
 }
 
-// 加载本地配置文件
-fn load_local_config() -> Result<PrinterConfig, String> {
+// 加载本地配置文件，返回配置和文件路径
+fn load_local_config() -> Result<(PrinterConfig, std::path::PathBuf), String> {
     use std::path::PathBuf;
     
     // 尝试从多个可能的位置加载本地配置
@@ -105,7 +111,7 @@ fn load_local_config() -> Result<PrinterConfig, String> {
             let config: PrinterConfig = serde_json::from_str(&content)
                 .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
             
-            return Ok(config);
+            return Ok((config, config_path.clone()));
         }
     }
     
@@ -118,31 +124,105 @@ fn load_local_config() -> Result<PrinterConfig, String> {
     Err(error_msg)
 }
 
-// 加载打印机配置（优先本地，远程失败只提示）
+// 保存配置到本地文件
+fn save_config_to_local(config: &PrinterConfig, config_path: &std::path::Path) -> Result<(), String> {
+    use std::io::Write;
+    
+    let json_content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("序列化配置失败: {}", e))?;
+    
+    // 确保目录存在
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    
+    // 写入文件
+    let mut file = fs::File::create(config_path)
+        .map_err(|e| format!("创建配置文件失败: {}", e))?;
+    
+    file.write_all(json_content.as_bytes())
+        .map_err(|e| format!("写入配置文件失败: {}", e))?;
+    
+    file.sync_all()
+        .map_err(|e| format!("同步文件失败: {}", e))?;
+    
+    Ok(())
+}
+
+// 比较两个配置是否不同（比较版本号和配置内容）
+fn config_different(local: &PrinterConfig, remote: &PrinterConfig) -> bool {
+    // 先比较版本号
+    if let (Some(local_v), Some(remote_v)) = (&local.version, &remote.version) {
+        if local_v != remote_v {
+            return true;
+        }
+    } else if local.version.is_some() != remote.version.is_some() {
+        // 一个有版本号，一个没有
+        return true;
+    }
+    
+    // 比较配置内容（areas）
+    // 如果 areas 数量不同，肯定不同
+    if local.areas.len() != remote.areas.len() {
+        return true;
+    }
+    
+    // 比较每个 area 和 printer
+    for (local_area, remote_area) in local.areas.iter().zip(remote.areas.iter()) {
+        if local_area.name != remote_area.name || local_area.printers.len() != remote_area.printers.len() {
+            return true;
+        }
+        
+        for (local_printer, remote_printer) in local_area.printers.iter().zip(remote_area.printers.iter()) {
+            if local_printer.name != remote_printer.name 
+                || local_printer.path != remote_printer.path 
+                || local_printer.model != remote_printer.model {
+                return true;
+            }
+        }
+    }
+    
+    false
+}
+
+// 加载打印机配置（默认加载本地，后台检查远程更新）
 #[tauri::command]
 async fn load_config() -> Result<LoadConfigResult, String> {
     // 优先加载本地配置
     match load_local_config() {
-        Ok(local_config) => {
-            // 本地配置加载成功，尝试加载远程配置（但不影响使用）
+        Ok((local_config, _config_path)) => {
+            let local_version = local_config.version.clone();
+            
+            // 本地配置加载成功，后台尝试加载远程配置进行对比
             // 使用 tokio::time::timeout 确保不会无限等待
             let remote_result = tokio::time::timeout(
-                std::time::Duration::from_secs(6), // 6秒总超时（比客户端超时多1秒）
+                std::time::Duration::from_secs(6), // 6秒总超时
                 load_remote_config()
             ).await;
             
-            let remote_error = match remote_result {
-                Ok(Ok(_remote_config)) => {
-                    // 远程配置加载成功（但我们使用本地配置）
-                    None
+            let (has_update, remote_config, remote_version, remote_error) = match remote_result {
+                Ok(Ok(remote_config)) => {
+                    let remote_version = remote_config.version.clone();
+                    
+                    // 比较配置是否不同
+                    if config_different(&local_config, &remote_config) {
+                        eprintln!("[INFO] 检测到远程配置更新 (本地: {:?}, 远程: {:?})", 
+                            local_version.as_ref().unwrap_or(&"未知".to_string()),
+                            remote_version.as_ref().unwrap_or(&"未知".to_string())
+                        );
+                        (true, Some(remote_config), remote_version, None)
+                    } else {
+                        (false, None, remote_version, None)
+                    }
                 }
                 Ok(Err(e)) => {
                     // 远程加载失败，只记录错误，不影响使用
-                    Some(format!("远程配置加载失败: {}（已使用本地配置）", e))
+                    (false, None, None, Some(format!("远程配置加载失败: {}（已使用本地配置）", e)))
                 }
                 Err(_) => {
-                    // 超时
-                    Some("远程配置加载超时（已使用本地配置）".to_string())
+                    // 超时，使用本地配置
+                    (false, None, None, Some("远程配置加载超时（已使用本地配置）".to_string()))
                 }
             };
             
@@ -150,6 +230,10 @@ async fn load_config() -> Result<LoadConfigResult, String> {
                 config: local_config,
                 source: "local".to_string(),
                 remote_error,
+                has_remote_update: has_update,
+                remote_config,
+                local_version,
+                remote_version,
             })
         }
         Err(local_err) => {
@@ -161,10 +245,39 @@ async fn load_config() -> Result<LoadConfigResult, String> {
             
             match remote_result {
                 Ok(Ok(remote_config)) => {
+                    let remote_version = remote_config.version.clone();
+                    
+                    // 远程配置加载成功，尝试保存到本地（使用可执行文件所在目录）
+                    let save_path = if let Ok(exe_path) = std::env::current_exe() {
+                        if let Some(exe_dir) = exe_path.parent() {
+                            exe_dir.join("printer_config.json")
+                        } else {
+                            std::path::PathBuf::from("printer_config.json")
+                        }
+                    } else {
+                        std::path::PathBuf::from("printer_config.json")
+                    };
+                    
+                    // 尝试保存远程配置到本地（可选，失败不影响使用）
+                    let remote_error = match save_config_to_local(&remote_config, &save_path) {
+                        Ok(_) => {
+                            eprintln!("[INFO] 本地配置不存在，已将远程配置保存到本地");
+                            None
+                        }
+                        Err(save_err) => {
+                            eprintln!("[WARN] 本地配置不存在，远程配置保存失败: {}", save_err);
+                            Some(format!("远程配置加载成功，但保存到本地失败: {}", save_err))
+                        }
+                    };
+                    
                     Ok(LoadConfigResult {
-                        config: remote_config,
+                        config: remote_config.clone(),
                         source: "remote".to_string(),
-                        remote_error: None,
+                        remote_error,
+                        has_remote_update: false,
+                        remote_config: None,
+                        local_version: None,
+                        remote_version,
                     })
                 }
                 Ok(Err(remote_err)) => {
@@ -180,6 +293,58 @@ async fn load_config() -> Result<LoadConfigResult, String> {
     }
 }
 
+// 确认更新配置（保存远程配置到本地）
+#[tauri::command]
+async fn confirm_update_config() -> Result<LoadConfigResult, String> {
+    // 重新加载本地配置和远程配置
+    match load_local_config() {
+        Ok((local_config, config_path)) => {
+            let local_version = local_config.version.clone();
+            
+            // 加载远程配置
+            let remote_result = tokio::time::timeout(
+                std::time::Duration::from_secs(6),
+                load_remote_config()
+            ).await;
+            
+            match remote_result {
+                Ok(Ok(remote_config)) => {
+                    let remote_version = remote_config.version.clone();
+                    
+                    // 保存远程配置到本地
+                    match save_config_to_local(&remote_config, &config_path) {
+                        Ok(_) => {
+                            eprintln!("[INFO] 已确认更新，远程配置已保存到本地");
+                            
+                            Ok(LoadConfigResult {
+                                config: remote_config,
+                                source: "remote_updated".to_string(),
+                                remote_error: None,
+                                has_remote_update: false,
+                                remote_config: None,
+                                local_version,
+                                remote_version,
+                            })
+                        }
+                        Err(save_err) => {
+                            Err(format!("保存配置文件失败: {}", save_err))
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    Err(format!("加载远程配置失败: {}", e))
+                }
+                Err(_) => {
+                    Err("加载远程配置超时".to_string())
+                }
+            }
+        }
+        Err(e) => {
+            Err(format!("加载本地配置失败: {}", e))
+        }
+    }
+}
+
 // 加载远程配置
 async fn load_remote_config() -> Result<PrinterConfig, String> {
     // 创建带超时的 HTTP 客户端（5秒超时）
@@ -188,7 +353,7 @@ async fn load_remote_config() -> Result<PrinterConfig, String> {
         .build()
         .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
     
-    let url = "https://example.com/printer_config.json";
+    let url = "https://p.edianyun.icu/printer_config.json";
     
     let response = client
         .get(url)
@@ -1220,7 +1385,8 @@ fn main() {
             load_config,
             list_printers,
             install_printer,
-            open_url
+            open_url,
+            confirm_update_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
