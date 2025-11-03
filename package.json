@@ -1,6 +1,6 @@
 {
   "name": "easy-printer",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "易点云打印机安装小精灵 - 基于 Tauri + Vue 3 + TailwindCSS",
   "type": "module",
   "scripts": {

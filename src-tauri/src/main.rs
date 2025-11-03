@@ -631,6 +631,7 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
             }
             
             // 查找通用驱动并添加打印机
+            // 改进的错误处理：捕获更详细的错误信息
             let printer_output = Command::new("powershell")
                 .arg("-NoProfile")
                 .arg("-WindowStyle")
@@ -638,9 +639,66 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                 .args([
                     "-Command",
                     &format!(
-                        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -DriverName $drivers.Name -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -DriverName $firstDriver -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
-                        name.replace("'", "''"),
-                        port_name.replace("'", "''"),
+                        r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$ErrorActionPreference = 'Stop';
+$driverName = $null;
+$errorMsg = '';
+
+# 尝试查找通用驱动
+try {{
+    $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
+        $_.Name -like '*Generic*' -or 
+        $_.Name -like '*Text*' -or 
+        $_.Name -like '*HP*' -or 
+        $_.Name -like '*RICOH*' -or 
+        $_.Name -like '*PCL*' -or 
+        $_.Name -like '*PostScript*'
+    }} | Select-Object -First 1;
+    
+    if ($drivers) {{
+        $driverName = $drivers.Name;
+        Write-Output ('找到驱动: ' + $driverName);
+    }}
+}} catch {{
+    $errorMsg += ('查找驱动错误: ' + $_.Exception.Message + '; ');
+}}
+
+# 如果没有找到通用驱动，尝试使用第一个可用驱动
+if (-not $driverName) {{
+    try {{
+        $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Select-Object -First 1;
+        if ($allDrivers) {{
+            $driverName = $allDrivers.Name;
+            Write-Output ('使用默认驱动: ' + $driverName);
+        }} else {{
+            Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。';
+            exit 1;
+        }}
+    }} catch {{
+        Write-Error ('获取驱动列表失败: ' + $_.Exception.Message);
+        exit 1;
+    }}
+}}
+
+# 尝试安装打印机
+if ($driverName) {{
+    try {{
+        Add-Printer -Name '{}' -DriverName $driverName -PortName '{}' -ErrorAction Stop;
+        Write-Output 'Success';
+    }} catch {{
+        $fullError = $_.Exception.GetType().FullName + ': ' + $_.Exception.Message;
+        if ($_.Exception.InnerException) {{
+            $fullError += ' | 内部错误: ' + $_.Exception.InnerException.Message;
+        }}
+        Write-Error $fullError;
+        exit 1;
+    }}
+}} else {{
+    Write-Error '无法找到可用的打印机驱动';
+    exit 1;
+}}
+"#,
                         name.replace("'", "''"),
                         port_name.replace("'", "''")
                     )
@@ -656,6 +714,10 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                     let printer_stdout = decode_windows_string(&printer_result.stdout);
                     let printer_stderr = decode_windows_string(&printer_result.stderr);
                     
+                    eprintln!("[DEBUG] Add-Printer stdout: {}", printer_stdout);
+                    eprintln!("[DEBUG] Add-Printer stderr: {}", printer_stderr);
+                    eprintln!("[DEBUG] Add-Printer exit code: {:?}", printer_result.status.code());
+                    
                     if printer_result.status.success() || printer_stdout.contains("Success") {
                         Ok(InstallResult {
                             success: true,
@@ -663,9 +725,21 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                             method: Some("Add-Printer".to_string()),
                         })
                     } else {
+                        // 组合详细的错误信息
+                        let mut error_details = String::new();
+                        if !printer_stdout.trim().is_empty() {
+                            error_details.push_str(&format!("标准输出: {}; ", printer_stdout.trim()));
+                        }
+                        if !printer_stderr.trim().is_empty() {
+                            error_details.push_str(&format!("错误输出: {}", printer_stderr.trim()));
+                        }
+                        if error_details.is_empty() {
+                            error_details = format!("退出代码: {:?}", printer_result.status.code().unwrap_or(-1));
+                        }
+                        
                         Ok(InstallResult {
                             success: false,
-                            message: format!("端口添加成功，但打印机安装失败。错误信息: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", printer_stderr),
+                            message: format!("端口添加成功，但打印机安装失败。{}请确保系统中已安装打印机驱动，或联系管理员安装驱动。", error_details),
                             method: Some("Add-Printer".to_string()),
                         })
                     }
@@ -673,7 +747,7 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                 Err(e) => {
                     Ok(InstallResult {
                         success: false,
-                        message: format!("端口添加成功，但执行 Add-Printer 命令失败: {}", e),
+                        message: format!("端口添加成功，但执行 Add-Printer 命令失败: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", e),
                         method: Some("Add-Printer".to_string()),
                     })
                 }
@@ -726,6 +800,7 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                     
                     if result.status.success() {
                         // 端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
+                        // 使用改进的错误处理（与 Add-Printer 方式一致）
                         let ps_output = Command::new("powershell")
                             .arg("-NoProfile")
                             .arg("-WindowStyle")
@@ -733,9 +808,67 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                             .args([
                                 "-Command",
                                 &format!(
-                                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $port = '{}'; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -PortName $port -DriverName $drivers.Name -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -PortName $port -DriverName $firstDriver -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
+                                    r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$ErrorActionPreference = 'Stop';
+$driverName = $null;
+$port = '{}';
+
+# 尝试查找通用驱动
+try {{
+    $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
+        $_.Name -like '*Generic*' -or 
+        $_.Name -like '*Text*' -or 
+        $_.Name -like '*HP*' -or 
+        $_.Name -like '*RICOH*' -or 
+        $_.Name -like '*PCL*' -or 
+        $_.Name -like '*PostScript*'
+    }} | Select-Object -First 1;
+    
+    if ($drivers) {{
+        $driverName = $drivers.Name;
+        Write-Output ('找到驱动: ' + $driverName);
+    }}
+}} catch {{
+    Write-Error ('查找驱动错误: ' + $_.Exception.Message);
+}}
+
+# 如果没有找到通用驱动，尝试使用第一个可用驱动
+if (-not $driverName) {{
+    try {{
+        $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Select-Object -First 1;
+        if ($allDrivers) {{
+            $driverName = $allDrivers.Name;
+            Write-Output ('使用默认驱动: ' + $driverName);
+        }} else {{
+            Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。';
+            exit 1;
+        }}
+    }} catch {{
+        Write-Error ('获取驱动列表失败: ' + $_.Exception.Message);
+        exit 1;
+    }}
+}}
+
+# 尝试安装打印机
+if ($driverName) {{
+    try {{
+        Add-Printer -Name '{}' -PortName $port -DriverName $driverName -ErrorAction Stop;
+        Write-Output 'Success';
+    }} catch {{
+        $fullError = $_.Exception.GetType().FullName + ': ' + $_.Exception.Message;
+        if ($_.Exception.InnerException) {{
+            $fullError += ' | 内部错误: ' + $_.Exception.InnerException.Message;
+        }}
+        Write-Error $fullError;
+        exit 1;
+    }}
+}} else {{
+    Write-Error '无法找到可用的打印机驱动';
+    exit 1;
+}}
+"#,
                                     port_name,
-                                    name.replace("'", "''"),
                                     name.replace("'", "''")
                                 )
                             ])
@@ -750,6 +883,10 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                                 let ps_stdout = decode_windows_string(&ps_result.stdout);
                                 let ps_stderr = decode_windows_string(&ps_result.stderr);
                                 
+                                eprintln!("[DEBUG] VBS Add-Printer stdout: {}", ps_stdout);
+                                eprintln!("[DEBUG] VBS Add-Printer stderr: {}", ps_stderr);
+                                eprintln!("[DEBUG] VBS Add-Printer exit code: {:?}", ps_result.status.code());
+                                
                                 if ps_result.status.success() || ps_stdout.contains("Success") {
                                     Ok(InstallResult {
                                         success: true,
@@ -757,9 +894,21 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                                         method: Some("VBS".to_string()),
                                     })
                                 } else {
+                                    // 组合详细的错误信息
+                                    let mut error_details = String::new();
+                                    if !ps_stdout.trim().is_empty() {
+                                        error_details.push_str(&format!("标准输出: {}; ", ps_stdout.trim()));
+                                    }
+                                    if !ps_stderr.trim().is_empty() {
+                                        error_details.push_str(&format!("错误输出: {}", ps_stderr.trim()));
+                                    }
+                                    if error_details.is_empty() {
+                                        error_details = format!("退出代码: {:?}", ps_result.status.code().unwrap_or(-1));
+                                    }
+                                    
                                     Ok(InstallResult {
                                         success: false,
-                                        message: format!("端口添加成功，但打印机安装失败。错误信息: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", ps_stderr),
+                                        message: format!("端口添加成功，但打印机安装失败。{}请确保系统中已安装打印机驱动，或联系管理员安装驱动。", error_details),
                                         method: Some("VBS".to_string()),
                                     })
                                 }
@@ -767,7 +916,7 @@ async fn install_printer(name: String, path: String) -> Result<InstallResult, St
                             Err(e) => {
                                 Ok(InstallResult {
                                     success: false,
-                                    message: format!("端口添加成功，但执行 PowerShell 命令失败: {}", e),
+                                    message: format!("端口添加成功，但执行 PowerShell 命令失败: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", e),
                                     method: Some("VBS".to_string()),
                                 })
                             }
