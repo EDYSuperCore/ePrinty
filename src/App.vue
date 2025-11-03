@@ -1042,25 +1042,38 @@ export default {
                 console.warn('⚠️ 警告: printer.driver_path 为空！可能是配置文件中没有该字段或读取时丢失了')
               }
               
-              // 初始化安装进度
-              // 根据是否有配置的驱动路径，动态调整步骤
-              const steps = [
-                { name: '检查打印机驱动', message: '' },
-                { name: '删除旧打印机（如存在）', message: '' },
-                { name: '添加打印机端口', message: '' }
-              ]
-              
-              // 如果有配置的驱动路径，添加"从配置文件安装 INF 驱动"步骤
-              if (printer.driver_path) {
-                steps.push({ name: '查找品牌驱动', message: '' })
-                steps.push({ name: '从配置文件安装 INF 驱动', message: '' })
+              // 初始化安装进度（按平台显示不同的步骤）
+              // macOS: 安全优先，尽量提示用户使用系统方式（lpadmin / 系统设置）或提供 PPD
+              // Windows: 保留原有的详细自动化步骤（INF 安装 / Add-Printer 等）
+              const isMac = typeof navigator !== 'undefined' && navigator.platform && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+              let steps = []
+
+              if (isMac) {
+                // macOS 专用步骤 —— 不主动调用 Windows 特有的安装流程
+                if (printer.driver_path) {
+                  steps.push({ name: '准备 PPD/驱动 (可选)', message: '' })
+                }
+                steps.push({ name: '通过系统或 lpadmin 添加打印机', message: '' })
+                steps.push({ name: '检查打印机是否在线', message: '' })
+              } else {
+                // Windows / 其他平台使用原有流程
+                steps = [
+                  { name: '检查打印机驱动', message: '' },
+                  { name: '删除旧打印机（如存在）', message: '' },
+                  { name: '添加打印机端口', message: '' }
+                ]
+
+                if (printer.driver_path) {
+                  steps.push({ name: '查找品牌驱动', message: '' })
+                  steps.push({ name: '从配置文件安装 INF 驱动', message: '' })
+                }
+
+                steps.push(
+                  { name: '安装打印机驱动', message: '' },
+                  { name: '配置打印机', message: '' },
+                  { name: '验证安装', message: '' }
+                )
               }
-              
-              steps.push(
-                { name: '安装打印机驱动', message: '' },
-                { name: '配置打印机', message: '' },
-                { name: '验证安装', message: '' }
-              )
               
               this.installProgress = {
                 printerName: printer.name,

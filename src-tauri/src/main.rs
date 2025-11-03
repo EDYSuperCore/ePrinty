@@ -2073,14 +2073,37 @@ if ($driverName) {{
         // 1. 复制 PPD 文件（如果有）或使用系统自带的驱动
         // 2. 使用 lpadmin 安装打印机
         
-        // 从路径中提取 IP 地址（格式：\\192.168.x.x 或 lpd://192.168.x.x）
-        let ip_address = path
+    // 从路径中提取 IP 地址（格式：\\192.168.x.x 或 lpd://192.168.x.x）
+    let ip_address = path
             .trim_start_matches("\\\\")
             .trim_start_matches("lpd://")
             .trim_start_matches("http://")
             .trim_start_matches("https://")
             .to_string();
         
+        // 在调用系统命令前对 printer name 做额外校验：
+        // lpadmin 常见报错为 "printer name can only contain printable characters"，
+        // 因此拒绝包含控制字符的名称并返回友好错误给前端。
+        let name_trim = name.trim();
+        if name_trim.is_empty() {
+            return Ok(InstallResult {
+                success: false,
+                message: "安装打印机失败: 打印机名称不能为空。 [方式: macOS]".to_string(),
+                method: Some("macOS".to_string()),
+                stdout: None,
+                stderr: None,
+            });
+        }
+        if name_trim.chars().any(|c| c.is_control()) {
+            return Ok(InstallResult {
+                success: false,
+                message: "安装打印机失败: lpadmin: 打印机名称只能包含可打印字符。请确保已授予管理员权限，或联系管理员。 [方式: macOS]".to_string(),
+                method: Some("macOS".to_string()),
+                stdout: None,
+                stderr: None,
+            });
+        }
+
         // 构建 lpd:// URL（macOS 通常使用 lpd 协议）
         let printer_url = format!("lpd://{}", ip_address);
         
@@ -2911,9 +2934,20 @@ fn main() {
         let error_str = e.to_string();
         let mut error_msg = String::new();
         
-        // 如果是 WebView2 错误，提供更具体的帮助信息
-        if error_str.contains("WebView2") || error_str.contains(ERROR_FILE_NOT_FOUND) || 
-           error_str.contains("failed to create webview") || error_str.contains("cannot find the file specified") {
+          // 如果是 WebView2 错误，提供更具体的帮助信息
+          // NOTE: ERROR_FILE_NOT_FOUND 常量仅在 windows cfg 下定义，避免非 Windows 平台引用未定义符号
+          #[cfg(windows)]
+          let is_webview2_error = error_str.contains("WebView2")
+              || error_str.contains(ERROR_FILE_NOT_FOUND)
+              || error_str.contains("failed to create webview")
+              || error_str.contains("cannot find the file specified");
+
+          #[cfg(not(windows))]
+          let is_webview2_error = error_str.contains("WebView2")
+              || error_str.contains("failed to create webview")
+              || error_str.contains("cannot find the file specified");
+
+          if is_webview2_error {
             error_msg = format!(
                 "WebView2 运行时未安装或版本不兼容\n\n\
                 此应用需要 Microsoft Edge WebView2 运行时（版本 90.0 或更高）才能运行。\n\n\
@@ -2931,7 +2965,7 @@ fn main() {
                 提示：即使已安装 Edge 浏览器，也可能需要单独安装 WebView2 运行时。", 
                 WEBVIEW2_DOWNLOAD_URL, error_str, e
             );
-        } else {
+    } else {
             error_msg = format!(
                 "应用启动失败\n\n\
                 错误信息：{}\n\n\
