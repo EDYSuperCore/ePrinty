@@ -42,11 +42,12 @@ pub async fn install_printer(
     path: String,
     driverPath: Option<String>,
     model: Option<String>,
+    driverInstallPolicy: Option<String>,  // 驱动安装策略："always" | "reuse_if_installed"
 ) -> Result<crate::InstallResult, String> {
     #[cfg(windows)]
     {
         // Windows 平台：调用 Windows 实现
-        let result = crate::platform::windows::install::install_printer_windows(name, path, driverPath, model).await?;
+        let result = crate::platform::windows::install::install_printer_windows(name, path, driverPath, model, driverInstallPolicy).await?;
         // 转换 InstallResult 类型（从 platform/windows/install::InstallResult 到 crate::InstallResult）
         Ok(crate::InstallResult {
             success: result.success,

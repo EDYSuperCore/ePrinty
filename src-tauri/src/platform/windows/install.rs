@@ -56,6 +56,10 @@ enum InstallError {
         field: &'static str,
         reason: String,
     },
+    /// 配置无效
+    InvalidConfig {
+        reason: String,
+    },
     /// 未找到打印机驱动
     DriverNotFound {
         step: &'static str,
@@ -95,6 +99,23 @@ enum InstallError {
     PrinterInstallFailedVbs {
         stderr: String,
     },
+    /// INF 驱动安装失败
+    InfInstallFailed {
+        inf_path: String,
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
+    /// PrintUIEntry /if 安装失败
+    PrintUIInfInstallFailed {
+        printer_name: String,
+        inf_path: String,
+        port_name: String,
+        model: String,
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
 }
 
 impl InstallError {
@@ -104,6 +125,7 @@ impl InstallError {
             InstallError::CommandFailed { .. } => "WIN_CMD_FAILED",
             InstallError::PowerShellFailed { .. } => "WIN_PS_FAILED",
             InstallError::InvalidInput { .. } => "WIN_INVALID_INPUT",
+            InstallError::InvalidConfig { .. } => "WIN_INVALID_CONFIG",
             InstallError::DriverNotFound { .. } => "WIN_DRIVER_NOT_FOUND",
             InstallError::PortCreateTimeout { .. } => "WIN_PORT_TIMEOUT",
             InstallError::FileOperationFailed { .. } => "WIN_FILE_FAILED",
@@ -112,6 +134,8 @@ impl InstallError {
             InstallError::VbsScriptFailed { .. } => "WIN_VBS_FAILED",
             InstallError::PrinterInstallFailedModern { .. } => "WIN_PRINTER_INSTALL_FAILED",
             InstallError::PrinterInstallFailedVbs { .. } => "WIN_PRINTER_INSTALL_FAILED",
+            InstallError::InfInstallFailed { .. } => "WIN_INF_INSTALL_FAILED",
+            InstallError::PrintUIInfInstallFailed { .. } => "WIN_PRINTUI_INF_INSTALL_FAILED",
         }
     }
 
@@ -122,6 +146,12 @@ impl InstallError {
                 (Some(stdout.clone()), Some(stderr.clone()))
             }
             InstallError::PortAddFailedVbs { stdout, stderr, .. } => {
+                (Some(stdout.clone()), Some(stderr.clone()))
+            }
+            InstallError::InfInstallFailed { stdout, stderr, .. } => {
+                (Some(stdout.clone()), Some(stderr.clone()))
+            }
+            InstallError::PrintUIInfInstallFailed { stdout, stderr, .. } => {
                 (Some(stdout.clone()), Some(stderr.clone()))
             }
             _ => (None, None),
@@ -160,6 +190,9 @@ impl InstallError {
             InstallError::InvalidInput { field, reason } => {
                 format!("输入参数 {} 无效: {}", field, reason)
             }
+            InstallError::InvalidConfig { reason } => {
+                reason.clone()
+            }
             InstallError::DriverNotFound { step: _ } => {
                 "系统中没有可用的打印机驱动。请先安装打印机驱动。".to_string()
             }
@@ -188,6 +221,22 @@ impl InstallError {
             }
             InstallError::PrinterInstallFailedVbs { stderr } => {
                 format!("端口添加成功，但打印机安装失败。错误信息: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", stderr)
+            }
+            InstallError::InfInstallFailed { inf_path, exit_code, stdout, stderr } => {
+                let exit_msg = match exit_code {
+                    Some(code) => format!("退出代码: {}", code),
+                    None => "无法获取退出代码".to_string(),
+                };
+                format!("从配置文件安装 INF 驱动失败。文件: {}。{}。标准输出: {}。错误输出: {}", 
+                    inf_path, exit_msg, stdout, stderr)
+            }
+            InstallError::PrintUIInfInstallFailed { printer_name, inf_path, port_name, model, exit_code, stdout, stderr } => {
+                let exit_msg = match exit_code {
+                    Some(code) => format!("退出代码: {}", code),
+                    None => "无法获取退出代码".to_string(),
+                };
+                format!("使用 PrintUIEntry 安装打印机失败。打印机: {}，驱动: {}，端口: {}，型号: {}。{}。标准输出: {}。错误输出: {}", 
+                    printer_name, inf_path, port_name, model, exit_msg, stdout, stderr)
             }
         }
     }
@@ -282,6 +331,341 @@ fn delete_existing_printer(name: &str) {
         &printer_name_arg,
         "/q"    // 静默模式，不显示确认对话框
     ]);
+}
+
+/// 使用 PrintUIEntry /if 安装打印机（同时导入驱动）
+/// 
+/// # 参数
+/// - `printer_name`: 打印机名称
+/// - `inf_path`: INF 驱动文件路径
+/// - `port_name`: 端口名称
+/// - `model`: 打印机型号
+/// 
+/// # 返回
+/// - `Ok(InstallResult)`: 安装成功
+/// - `Err(InstallError)`: 安装失败
+/// 
+/// # 实现说明
+/// 使用 rundll32 printui.dll,PrintUIEntry /if 安装打印机
+/// 该命令会同时导入驱动并创建打印机队列
+/// 命令格式：rundll32 printui.dll,PrintUIEntry /if /b "<printer_name>" /f "<inf_path>" /r "<port_name>" /m "<model>" /z
+fn install_printer_with_printui(
+    printer_name: &str,
+    inf_path: &std::path::Path,
+    port_name: &str,
+    model: &str,
+) -> Result<InstallResult, InstallError> {
+    eprintln!("[DEBUG] 使用 PrintUIEntry /if 安装打印机: {}", printer_name);
+    eprintln!("[DEBUG] INF 路径: {}", inf_path.display());
+    eprintln!("[DEBUG] 端口: {}", port_name);
+    eprintln!("[DEBUG] 型号: {}", model);
+    
+    // 检查 INF 文件是否存在
+    if !inf_path.exists() {
+        return Err(InstallError::FileOperationFailed {
+            step: "install_printer_with_printui",
+            operation: "检查 INF 文件",
+            error: format!("INF 文件不存在: {}", inf_path.display()),
+        });
+    }
+    
+    // 将路径转换为绝对路径
+    let inf_path_abs = match inf_path.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            return Err(InstallError::FileOperationFailed {
+                step: "install_printer_with_printui",
+                operation: "解析 INF 文件路径",
+                error: format!("无法解析 INF 文件路径: {}", e),
+            });
+        }
+    };
+    
+    // 将路径转换为字符串
+    let inf_path_str = inf_path_abs.to_string_lossy().to_string();
+    
+    // 剥离 "\\?\" 扩展路径前缀（PrintUIEntry 不支持此前缀）
+    // canonicalize() 可能返回 "\\?\E:\..." 格式，需要转换为标准 Win32 路径 "E:\..."
+    let inf_path_normalized = if inf_path_str.starts_with(r"\\?\") {
+        // 剥离 "\\?\" 前缀
+        let without_prefix = &inf_path_str[4..];
+        // 如果是 UNC 路径 "\\?\UNC\server\share"，转换为 "\\server\share"
+        if without_prefix.starts_with(r"UNC\") {
+            format!(r"\\{}", &without_prefix[4..])
+        } else {
+            without_prefix.to_string()
+        }
+    } else {
+        inf_path_str
+    };
+    
+    // 确保路径使用反斜杠（Windows 标准）
+    // 虽然 Rust 的 Path 通常会自动处理，但为了确保一致性，我们显式转换
+    let inf_path_final = inf_path_normalized.replace("/", "\\");
+    
+    eprintln!("[DEBUG] 规范化后的 inf_path: {}", inf_path_final);
+    eprintln!("[DEBUG] 执行 PrintUIEntry: /if /b \"{}\" /f \"{}\" /r \"{}\" /m \"{}\" /z", 
+        printer_name, inf_path_final, port_name, model);
+    
+    // 使用 rundll32 printui.dll,PrintUIEntry /if 安装打印机
+    // 注意：Command::args() 会自动处理参数转义，不需要手动添加引号
+    // /if: 安装打印机（从 INF 文件）
+    // /b: 打印机名称
+    // /f: INF 文件路径
+    // /r: 端口名称
+    // /m: 打印机型号
+    // /z: 静默模式（不显示确认对话框）
+    match super::cmd::run_command("rundll32.exe", &[
+        "printui.dll,PrintUIEntry",
+        "/if",
+        "/b",
+        printer_name,
+        "/f",
+        &inf_path_final,
+        "/r",
+        port_name,
+        "/m",
+        model,
+        "/z"
+    ]) {
+        Ok(output) => {
+            let stdout = decode_windows_string(&output.stdout);
+            let stderr = decode_windows_string(&output.stderr);
+            let exit_code = output.status.code();
+            
+            eprintln!("[DEBUG] PrintUIEntry exit code: {:?}, stdout length: {}, stderr length: {}", 
+                exit_code, stdout.len(), stderr.len());
+            
+            if output.status.success() {
+                eprintln!("[DEBUG] PrintUIEntry 执行成功，打印机已安装");
+                Ok(InstallResult {
+                    success: true,
+                    message: format!("打印机 {} 安装成功（使用 PrintUIEntry）", printer_name),
+                    method: Some("PrintUIEntry".to_string()),
+                    stdout: Some(stdout),
+                    stderr: Some(stderr),
+                })
+            } else {
+                eprintln!("[ERROR] PrintUIEntry 执行失败，exit code: {:?}", exit_code);
+                let error = InstallError::PrintUIInfInstallFailed {
+                    printer_name: printer_name.to_string(),
+                    inf_path: inf_path_final.clone(),
+                    port_name: port_name.to_string(),
+                    model: model.to_string(),
+                    exit_code,
+                    stdout,
+                    stderr,
+                };
+                Err(error)
+            }
+        }
+        Err(e) => {
+            eprintln!("[ERROR] PrintUIEntry 命令执行失败: {}", e);
+            Err(InstallError::CommandFailed {
+                step: "install_printer_with_printui",
+                command: format!("rundll32.exe printui.dll,PrintUIEntry /if /b \"{}\" /f \"{}\" /r \"{}\" /m \"{}\" /z", 
+                    printer_name, inf_path_final, port_name, model),
+                stderr: e,
+            })
+        }
+    }
+}
+
+/// 安装 INF 驱动文件
+/// 
+/// # 参数
+/// - `inf_path`: INF 文件的完整路径
+/// - `driver_names`: 驱动名称候选列表，用于验证安装是否成功
+/// 
+/// # 返回
+/// - `Ok(())`: 安装成功且驱动已注册
+/// - `Err(InstallError)`: 安装失败或驱动未注册
+/// 
+/// # 实现说明
+/// 使用 pnputil.exe 安装 INF 驱动
+/// pnputil 是 Windows 推荐的驱动安装工具，比 Add-PrinterDriver 更可靠
+fn install_inf_driver(inf_path: &std::path::Path, driver_names: &[String]) -> Result<(), InstallError> {
+    eprintln!("[DEBUG] 开始安装 INF 驱动: {}", inf_path.display());
+    
+    // 检查 INF 文件是否存在
+    if !inf_path.exists() {
+        return Err(InstallError::FileOperationFailed {
+            step: "install_inf_driver",
+            operation: "检查 INF 文件",
+            error: format!("INF 文件不存在: {}", inf_path.display()),
+        });
+    }
+    
+    // 将路径转换为绝对路径（使用原生 Windows 路径格式）
+    let inf_path_abs = match inf_path.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            return Err(InstallError::FileOperationFailed {
+                step: "install_inf_driver",
+                operation: "解析 INF 文件路径",
+                error: format!("无法解析 INF 文件路径: {}", e),
+            });
+        }
+    };
+    
+    // 将路径转换为字符串，使用引号包裹以处理包含空格/中文的路径
+    let inf_path_str = inf_path_abs.to_string_lossy();
+    let inf_path_quoted = format!("\"{}\"", inf_path_str);
+    
+    eprintln!("[DEBUG] 执行 pnputil: /add-driver {} /install", inf_path_quoted);
+    
+    // 使用 pnputil.exe 安装 INF 驱动
+    // pnputil.exe /add-driver "<inf_path>" /install
+    match super::cmd::run_command("pnputil.exe", &[
+        "/add-driver",
+        &inf_path_quoted,
+        "/install"
+    ]) {
+        Ok(output) => {
+            let stdout = decode_windows_string(&output.stdout);
+            let stderr = decode_windows_string(&output.stderr);
+            let exit_code = output.status.code();
+            
+            eprintln!("[DEBUG] pnputil exit code: {:?}, stdout length: {}, stderr length: {}", 
+                exit_code, stdout.len(), stderr.len());
+            
+            // pnputil 成功时 exit code 为 0
+            if output.status.success() {
+                eprintln!("[DEBUG] pnputil 执行成功");
+                
+                // 安装成功后，立即验证 driver_names 中是否有已安装驱动可用
+                match select_installed_driver_name(driver_names) {
+                    Ok(driver_name) => {
+                        eprintln!("[DEBUG] INF 驱动安装成功，找到已注册驱动: {}", driver_name);
+                        Ok(())
+                    }
+                    Err((e, _)) => {
+                        // INF 安装完成但 driver_names 不可用
+                        let candidates_str = driver_names.join(", ");
+                        eprintln!("[WARN] INF 安装完成但 driver_names 中未找到已注册驱动。候选: {}", candidates_str);
+                        
+                        Err(InstallError::InfInstallFailed {
+                            inf_path: inf_path_str.to_string(),
+                            exit_code: Some(0), // pnputil 成功，但驱动未注册
+                            stdout: format!("pnputil 执行成功，但 driver_names 中未找到已安装驱动。候选列表: {}", candidates_str),
+                            stderr: format!("请检查 driver_names 是否与系统 DriverName 一致。候选: {}", candidates_str),
+                        })
+                    }
+                }
+            } else {
+                // pnputil 执行失败
+                eprintln!("[ERROR] pnputil 执行失败，exit code: {:?}", exit_code);
+                Err(InstallError::InfInstallFailed {
+                    inf_path: inf_path_str.to_string(),
+                    exit_code,
+                    stdout,
+                    stderr,
+                })
+            }
+        }
+        Err(e) => {
+            // 命令执行失败（如进程启动失败）
+            eprintln!("[ERROR] pnputil 命令执行失败: {}", e);
+            Err(InstallError::CommandFailed {
+                step: "install_inf_driver",
+                command: format!("pnputil.exe /add-driver {} /install", inf_path_quoted),
+                stderr: e,
+            })
+        }
+    }
+}
+
+/// 获取应用目录（可执行文件所在目录）
+fn get_app_directory() -> Result<std::path::PathBuf, String> {
+    std::env::current_exe()
+        .and_then(|exe_path| {
+            exe_path.parent()
+                .ok_or_else(|| std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "无法获取可执行文件目录"
+                ))
+                .map(|dir| dir.to_path_buf())
+        })
+        .map_err(|e| format!("获取应用目录失败: {}", e))
+}
+
+/// 解析 driver_path（相对于应用目录）
+fn resolve_driver_path(driver_path: &str) -> Result<std::path::PathBuf, InstallError> {
+    let app_dir = get_app_directory()
+        .map_err(|e| InstallError::FileOperationFailed {
+            step: "resolve_driver_path",
+            operation: "获取应用目录",
+            error: e,
+        })?;
+    
+    // driver_path 是相对于应用目录的路径
+    let full_path = app_dir.join(driver_path);
+    
+    Ok(full_path)
+}
+
+/// 按候选列表选择已安装驱动名
+/// 对每个候选驱动名执行 PowerShell 查询，返回第一个已安装的驱动名
+fn select_installed_driver_name(candidates: &[String]) -> Result<String, (InstallError, Option<String>)> {
+    // 过滤并 trim 候选列表
+    let filtered_candidates: Vec<String> = candidates
+        .iter()
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    
+    if filtered_candidates.is_empty() {
+        return Err((
+            InstallError::DriverNotFound {
+                step: "select_driver",
+            },
+            None,
+        ));
+    }
+    
+    // 收集所有检查失败的 stderr 信息（用于诊断）
+    let mut last_stderr: Option<String> = None;
+    
+    // 逐个检查候选驱动是否已安装
+    for candidate in &filtered_candidates {
+        // 使用 PowerShell 精确匹配驱动名
+        let check_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-PrinterDriver -Name '{}' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name",
+            candidate.replace("'", "''")
+        );
+        
+        match super::ps::run_powershell(&check_script) {
+            Ok(output) => {
+                let stdout = decode_windows_string(&output.stdout);
+                let trimmed_stdout = stdout.trim();
+                
+                // 如果 stdout 非空，说明驱动已安装
+                if !trimmed_stdout.is_empty() {
+                    eprintln!("[DEBUG] 找到已安装的驱动: {}", trimmed_stdout);
+                    return Ok(trimmed_stdout.to_string());
+                }
+                
+                // 记录 stderr（即使 stdout 为空，也可能有错误信息）
+                let stderr = decode_windows_string(&output.stderr);
+                if !stderr.trim().is_empty() {
+                    last_stderr = Some(stderr);
+                }
+            }
+            Err(e) => {
+                // PowerShell 执行失败，记录错误信息
+                last_stderr = Some(e);
+                // 继续检查下一个候选
+            }
+        }
+    }
+    
+    // 所有候选都未命中，返回错误和最后的 stderr
+    Err((
+        InstallError::DriverNotFound {
+            step: "select_driver",
+        },
+        last_stderr,
+    ))
 }
 
 /// 验证打印机端口是否存在
@@ -396,14 +780,15 @@ fn add_printer_port_modern(port_name: &str, ip_address: &str) -> Result<PortAddO
     }
 }
 
-/// 使用现代方式添加打印机（查找驱动并添加）
-fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str) -> InstallResult {
-    // 查找通用驱动并添加打印机
+/// 使用现代方式添加打印机（使用指定的驱动）
+fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str, driver_name: &str) -> InstallResult {
+    eprintln!("[DEBUG] 使用驱动 '{}' 安装打印机 '{}' 到端口 '{}'", driver_name, name, port_name);
+    
+    // 使用指定的驱动添加打印机
     let printer_script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -DriverName $drivers.Name -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -DriverName $firstDriver -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Add-Printer -Name '{}' -DriverName '{}' -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }}",
         name.replace("'", "''"),
-        port_name.replace("'", "''"),
-        name.replace("'", "''"),
+        driver_name.replace("'", "''"),
         port_name.replace("'", "''")
     );
     let printer_output = super::ps::run_powershell(&printer_script);
@@ -422,29 +807,43 @@ fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str)
                     stderr: Some(printer_stderr),
                 }
             } else {
+                // 失败时包含诊断信息：驱动名、端口名、PowerShell stderr
+                let mut stderr_parts = Vec::new();
                 let error = InstallError::PrinterInstallFailedModern {
                     stderr: printer_stderr.clone(),
                 };
+                let base_stderr = error.format_stderr_with_code(Some(printer_stderr.clone())).unwrap_or_default();
+                stderr_parts.push(base_stderr);
+                stderr_parts.push(format!("Driver used: {}", driver_name));
+                stderr_parts.push(format!("Port: {}", port_name));
+                
                 InstallResult {
                     success: false,
                     message: error.to_user_message(),
                     method: Some("Add-Printer".to_string()),
                     stdout: Some(printer_stdout),
-                    stderr: error.format_stderr_with_code(Some(printer_stderr)),
+                    stderr: Some(stderr_parts.join(" | ")),
                 }
             }
         }
         Err(e) => {
+            // PowerShell 执行失败，包含诊断信息
+            let mut stderr_parts = Vec::new();
             let error = InstallError::PowerShellFailed {
                 step: "add_printer_with_driver_modern",
-                stderr: e,
+                stderr: e.clone(),
             };
+            let base_stderr = error.format_stderr_with_code(Some(e)).unwrap_or_default();
+            stderr_parts.push(base_stderr);
+            stderr_parts.push(format!("Driver used: {}", driver_name));
+            stderr_parts.push(format!("Port: {}", port_name));
+            
             InstallResult {
                 success: false,
                 message: error.to_user_message(),
                 method: Some("Add-Printer".to_string()),
                 stdout: None,
-                stderr: error.format_stderr_with_code(None),
+                stderr: Some(stderr_parts.join(" | ")),
             }
         }
     }
@@ -575,14 +974,16 @@ fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_addre
     }
 }
 
-/// 使用 VBS 方式添加打印机（查找驱动并添加）
-fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str) -> InstallResult {
+/// 使用 VBS 方式添加打印机（使用指定的驱动）
+fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, driver_name: &str) -> InstallResult {
+    eprintln!("[DEBUG] 使用驱动 '{}' 安装打印机 '{}' 到端口 '{}' (VBS方式)", driver_name, name, port_name);
+    
     // 端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
     let ps_script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $port = '{}'; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -PortName $port -DriverName $drivers.Name -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -PortName $port -DriverName $firstDriver -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
-        port_name,
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Add-Printer -Name '{}' -DriverName '{}' -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }}",
         name.replace("'", "''"),
-        name.replace("'", "''")
+        driver_name.replace("'", "''"),
+        port_name.replace("'", "''")
     );
     let ps_output = super::ps::run_powershell(&ps_script);
     
@@ -600,29 +1001,43 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str) ->
                     stderr: Some(ps_stderr),
                 }
             } else {
+                // 失败时包含诊断信息：驱动名、端口名、PowerShell stderr
+                let mut stderr_parts = Vec::new();
                 let error = InstallError::PrinterInstallFailedVbs {
                     stderr: ps_stderr.clone(),
                 };
+                let base_stderr = error.format_stderr_with_code(Some(ps_stderr.clone())).unwrap_or_default();
+                stderr_parts.push(base_stderr);
+                stderr_parts.push(format!("Driver used: {}", driver_name));
+                stderr_parts.push(format!("Port: {}", port_name));
+                
                 InstallResult {
                     success: false,
                     message: error.to_user_message(),
                     method: Some("VBS".to_string()),
                     stdout: Some(ps_stdout),
-                    stderr: error.format_stderr_with_code(Some(ps_stderr)),
+                    stderr: Some(stderr_parts.join(" | ")),
                 }
             }
         }
         Err(e) => {
+            // PowerShell 执行失败，包含诊断信息
+            let mut stderr_parts = Vec::new();
             let error = InstallError::PowerShellFailed {
                 step: "add_printer_with_driver_vbs",
-                stderr: e,
+                stderr: e.clone(),
             };
+            let base_stderr = error.format_stderr_with_code(Some(e)).unwrap_or_default();
+            stderr_parts.push(base_stderr);
+            stderr_parts.push(format!("Driver used: {}", driver_name));
+            stderr_parts.push(format!("Port: {}", port_name));
+            
             InstallResult {
                 success: false,
                 message: error.to_user_message(),
                 method: Some("VBS".to_string()),
                 stdout: None,
-                stderr: error.format_stderr_with_code(None),
+                stderr: Some(stderr_parts.join(" | ")),
             }
         }
     }
@@ -631,6 +1046,24 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str) ->
 // ============================================================================
 // 主函数
 // ============================================================================
+
+/// 驱动安装策略枚举
+#[derive(Debug, Clone, Copy)]
+enum DriverInstallPolicy {
+    /// 总是安装/更新 INF 驱动（稳定）
+    Always,
+    /// 若系统已存在驱动则跳过 INF（更快，可能版本不一致）
+    ReuseIfInstalled,
+}
+
+impl DriverInstallPolicy {
+    fn from_str(s: Option<&str>) -> Self {
+        match s {
+            Some("reuse_if_installed") => DriverInstallPolicy::ReuseIfInstalled,
+            _ => DriverInstallPolicy::Always,  // 默认值
+        }
+    }
+}
 
 /// Windows 平台打印机安装入口
 /// 
@@ -641,55 +1074,393 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str) ->
 pub async fn install_printer_windows(
     name: String,
     path: String,
-    #[allow(unused_variables)] driverPath: Option<String>,
+    driverPath: Option<String>,
     #[allow(unused_variables)] model: Option<String>,
+    driverInstallPolicy: Option<String>,  // 驱动安装策略："always" | "reuse_if_installed"
 ) -> Result<InstallResult, String> {
     
-    // 校验 driver_names 字段（早失败）
-    // 从配置文件中查找匹配的 printer item 并校验 driver_names
-    match crate::load_local_config() {
+    // 解析驱动安装策略
+    let policy = DriverInstallPolicy::from_str(driverInstallPolicy.as_deref());
+    eprintln!("[INFO] 驱动安装策略: {:?}", policy);
+    
+    // 步骤0：从配置文件中查找匹配的 printer item，提取 driver_names（避免生命周期问题）
+    let driver_names_option = match crate::load_local_config() {
         Ok((config, _)) => {
             // 在所有 areas 中查找匹配的 printer item（通过 name 或 path 匹配）
-            let mut matched_printer: Option<&crate::Printer> = None;
+            let mut matched_driver_names: Option<Vec<String>> = None;
             for area in &config.areas {
                 for printer in &area.printers {
                     if printer.name == name || printer.path == path {
-                        matched_printer = Some(printer);
+                        // 提取 driver_names 的副本，避免生命周期问题
+                        matched_driver_names = printer.driver_names.clone();
                         break;
                     }
                 }
-                if matched_printer.is_some() {
+                if matched_driver_names.is_some() {
                     break;
                 }
             }
-            
-            // 如果找到匹配的 printer item，校验 driver_names
-            if let Some(printer) = matched_printer {
-                // 检查 driver_names 是否存在且非空
-                match &printer.driver_names {
-                    None => {
-                        return Err("配置缺少 driver_names，请更新 printer_config.json".to_string());
-                    }
-                    Some(names) => {
-                        // 检查数组是否为空
-                        if names.is_empty() {
-                            return Err("配置缺少 driver_names，请更新 printer_config.json".to_string());
+            matched_driver_names
+        }
+        Err(e) => {
+            // 配置文件加载失败，不进行校验（保持向后兼容，允许通过其他方式安装）
+            eprintln!("[WARN] 无法加载配置文件: {}，跳过配置校验", e);
+            None
+        }
+    };
+    
+    // 步骤0.5：检查是否使用 PrintUIEntry /if 路径
+    // 当 driver_path 和 model 都存在时，使用 PrintUIEntry /if 安装（同时导入驱动并创建打印机）
+    if let Some(driver_path_str) = &driverPath {
+        if !driver_path_str.trim().is_empty() {
+            if let Some(model_str) = &model {
+                if !model_str.trim().is_empty() {
+                    // 使用 PrintUIEntry /if 路径
+                    eprintln!("[INFO] 检测到 driver_path 和 model，使用 PrintUIEntry /if 安装路径");
+                    
+                    // 解析 driver_path（相对于应用目录）
+                    let inf_path = match resolve_driver_path(driver_path_str) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            return Ok(InstallResult {
+                                success: false,
+                                message: e.to_user_message(),
+                                method: Some("PrintUIEntry".to_string()),
+                                stdout: None,
+                                stderr: e.format_stderr_with_code(None),
+                            });
                         }
-                        // 检查数组中的元素是否全部为空白（trim 后为空）
-                        let all_empty = names.iter().all(|n| n.trim().is_empty());
-                        if all_empty {
-                            return Err("driver_names 不能为空".to_string());
+                    };
+                    
+                    // 从路径中提取 IP 地址（格式：\\192.168.x.x）
+                    let ip_address = path.trim_start_matches("\\\\").to_string();
+                    
+                    // 端口名格式：IP_IP地址（用下划线替换点）
+                    let port_name = format!("IP_{}", ip_address.replace(".", "_"));
+                    
+                    // 检测 Windows 构建号来判断是否支持 Add-PrinterPort
+                    let windows_build = get_windows_build_number().unwrap_or(0);
+                    let use_modern_method = if windows_build == 0 {
+                        eprintln!("[DEBUG] 构建号检测失败，默认使用现代方法（Add-PrinterPort）");
+                        true
+                    } else {
+                        windows_build >= 10240
+                    };
+                    
+                    eprintln!("[DEBUG] Windows 构建号: {}, 使用现代方法: {}", windows_build, use_modern_method);
+                    
+                    // 删除旧打印机（如果存在）
+                    delete_existing_printer(&name);
+                    
+                    // 创建端口
+                    if use_modern_method {
+                        // Windows 10+ 使用 Add-PrinterPort
+                        match add_printer_port_modern(&port_name, &ip_address) {
+                            Err(e) => {
+                                let (stdout, stderr) = e.get_output();
+                                return Ok(InstallResult {
+                                    success: false,
+                                    message: e.to_user_message(),
+                                    method: Some("PrintUIEntry".to_string()),
+                                    stdout,
+                                    stderr: e.format_stderr_with_code(stderr),
+                                });
+                            }
+                            Ok(_) => {
+                                eprintln!("[DEBUG] 端口创建成功，继续使用 PrintUIEntry 安装打印机");
+                            }
+                        }
+                    } else {
+                        // Windows 7/8 使用 VBS 脚本
+                        let script_path = write_vbs_script_to_temp()
+                            .map_err(|e| e.to_user_message())?;
+                        
+                        match add_printer_port_vbs(&script_path, &port_name, &ip_address) {
+                            Err(result) => return Ok(result),
+                            Ok(_) => {
+                                eprintln!("[DEBUG] 端口创建成功（VBS），继续使用 PrintUIEntry 安装打印机");
+                            }
+                        }
+                    }
+                    
+                    // 使用 PrintUIEntry /if 安装打印机（同时导入驱动）
+                    match install_printer_with_printui(&name, &inf_path, &port_name, model_str) {
+                        Ok(result) => {
+                            return Ok(result);
+                        }
+                        Err(e) => {
+                            let (stdout, stderr) = e.get_output();
+                            return Ok(InstallResult {
+                                success: false,
+                                message: e.to_user_message(),
+                                method: Some("PrintUIEntry".to_string()),
+                                stdout,
+                                stderr: e.format_stderr_with_code(stderr),
+                            });
                         }
                     }
                 }
             }
-            // 如果没有找到匹配的 printer item，不进行校验（可能是通过其他方式安装，保持向后兼容）
-        }
-        Err(e) => {
-            // 配置文件加载失败，不进行校验（保持向后兼容，允许通过其他方式安装）
-            eprintln!("[WARN] 无法加载配置文件进行 driver_names 校验: {}，跳过校验", e);
+            
+            // driver_path 存在但 model 缺失
+            let error = InstallError::InvalidConfig {
+                reason: "driver_path 需要同时提供 model 才能使用 PrintUIEntry /if 安装。请更新 printer_config.json 添加 model 字段。".to_string(),
+            };
+            return Ok(InstallResult {
+                success: false,
+                message: error.to_user_message(),
+                method: Some("PrintUIEntry".to_string()),
+                stdout: None,
+                stderr: error.format_stderr_with_code(None),
+            });
         }
     }
+    
+    // 步骤1：根据策略决定是否先安装 INF 驱动（无 driver_path 或 driver_path 存在但 model 缺失的场景）
+    let mut inf_installed = false;
+    
+    if let Some(driver_path_str) = &driverPath {
+        if !driver_path_str.trim().is_empty() {
+            match policy {
+                DriverInstallPolicy::Always => {
+                    // 策略：总是安装 INF 驱动
+                    eprintln!("[DEBUG] 策略: Always - 检测到 driver_path: {}，开始安装 INF 驱动", driver_path_str);
+                    
+                    // 解析 driver_path（相对于应用目录）
+                    let inf_path = match resolve_driver_path(driver_path_str) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            return Ok(InstallResult {
+                                success: false,
+                                message: e.to_user_message(),
+                                method: Some("install_inf_driver".to_string()),
+                                stdout: None,
+                                stderr: e.format_stderr_with_code(None),
+                            });
+                        }
+                    };
+                    
+                    // 安装 INF 驱动
+                    // 需要 driver_names 用于验证安装是否成功
+                    let driver_names_for_install = driver_names_option.as_ref()
+                        .map(|names| names.as_slice())
+                        .unwrap_or(&[]);
+                    
+                    match install_inf_driver(&inf_path, driver_names_for_install) {
+                        Ok(()) => {
+                            eprintln!("[DEBUG] INF 驱动安装成功");
+                            inf_installed = true;
+                        }
+                        Err(e) => {
+                            // INF 安装失败，直接终止安装流程
+                            let (stdout, stderr) = e.get_output();
+                            return Ok(InstallResult {
+                                success: false,
+                                message: e.to_user_message(),
+                                method: Some("install_inf_driver".to_string()),
+                                stdout,
+                                stderr: e.format_stderr_with_code(stderr),
+                            });
+                        }
+                    }
+                }
+                DriverInstallPolicy::ReuseIfInstalled => {
+                    // 策略：先尝试选择已安装的驱动，如果找不到再安装 INF
+                    eprintln!("[DEBUG] 策略: ReuseIfInstalled - 先尝试选择已安装的驱动");
+                    // 这一步将在步骤2中执行
+                }
+            }
+        }
+    }
+    
+    // 步骤2：校验 driver_names 字段并选择已安装的驱动
+    let selected_driver_name = match driver_names_option {
+        Some(names) => {
+            // 检查 driver_names 是否存在且非空
+            // 检查数组是否为空
+            if names.is_empty() {
+                let error = InstallError::InvalidConfig {
+                    reason: "配置缺少 driver_names，请更新 printer_config.json".to_string(),
+                };
+                return Ok(InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: None,
+                    stdout: None,
+                    stderr: error.format_stderr_with_code(None),
+                });
+            }
+            // 检查数组中的元素是否全部为空白（trim 后为空）
+            let all_empty = names.iter().all(|n| n.trim().is_empty());
+            if all_empty {
+                let error = InstallError::InvalidConfig {
+                    reason: "driver_names 不能为空".to_string(),
+                };
+                return Ok(InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: None,
+                    stdout: None,
+                    stderr: error.format_stderr_with_code(None),
+                });
+            }
+            
+            // 使用 driver_names 选择已安装的驱动
+            let selected_driver_name_result = match select_installed_driver_name(&names) {
+                Ok(driver_name) => {
+                    // 如果策略是 ReuseIfInstalled 且找到了驱动，跳过 INF 安装
+                    if matches!(policy, DriverInstallPolicy::ReuseIfInstalled) && !inf_installed {
+                        eprintln!("[INFO] 策略: ReuseIfInstalled - 找到已安装的驱动: {}，跳过 INF 安装", driver_name);
+                    }
+                    Ok(driver_name)
+                }
+                Err((e, ps_stderr)) => {
+                    // 如果策略是 ReuseIfInstalled 且未找到驱动，尝试安装 INF 后再选择
+                    if matches!(policy, DriverInstallPolicy::ReuseIfInstalled) && !inf_installed {
+                        if let Some(driver_path_str) = &driverPath {
+                            if !driver_path_str.trim().is_empty() {
+                                eprintln!("[INFO] 策略: ReuseIfInstalled - 未找到已安装的驱动，开始安装 INF 驱动");
+                                
+                                // 解析 driver_path（相对于应用目录）
+                                let inf_path = match resolve_driver_path(driver_path_str) {
+                                    Ok(path) => path,
+                                    Err(e) => {
+                                        // INF 路径解析失败，返回错误
+                                        let mut stderr_parts = Vec::new();
+                                        let error_code_msg = e.format_stderr_with_code(None).unwrap_or_default();
+                                        if !error_code_msg.is_empty() {
+                                            stderr_parts.push(error_code_msg);
+                                        }
+                                        let candidates_str = names.join(",");
+                                        stderr_parts.push(format!("Candidates: {}", candidates_str));
+                                        let stderr_msg = stderr_parts.join(" | ");
+                                        
+                                        return Ok(InstallResult {
+                                            success: false,
+                                            message: e.to_user_message(),
+                                            method: None,
+                                            stdout: None,
+                                            stderr: Some(stderr_msg),
+                                        });
+                                    }
+                                };
+                                
+                                // 安装 INF 驱动
+                                // install_inf_driver 内部已经验证了 driver_names，如果成功则说明驱动已注册
+                                match install_inf_driver(&inf_path, &names) {
+                                    Ok(()) => {
+                                        eprintln!("[DEBUG] INF 驱动安装成功");
+                                        inf_installed = true;
+                                        
+                                        // install_inf_driver 内部已经验证了 driver_names，再次选择确认
+                                        match select_installed_driver_name(&names) {
+                                            Ok(driver_name) => {
+                                                eprintln!("[INFO] INF 安装后找到驱动: {}", driver_name);
+                                                // 继续流程，使用找到的驱动
+                                                Ok(driver_name)
+                                            }
+                                            Err((e2, ps_stderr2)) => {
+                                                // 理论上不应该到这里，因为 install_inf_driver 已经验证过了
+                                                // 但为了安全起见，仍然返回错误
+                                                Err((e2, ps_stderr2))
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        // INF 安装失败，返回错误
+                                        let (stdout, stderr) = e.get_output();
+                                        let mut stderr_parts = Vec::new();
+                                        
+                                        // 添加错误码前缀的 stderr
+                                        let error_stderr = e.format_stderr_with_code(stderr).unwrap_or_default();
+                                        if !error_stderr.is_empty() {
+                                            stderr_parts.push(error_stderr);
+                                        }
+                                        
+                                        let candidates_str = names.join(",");
+                                        stderr_parts.push(format!("Candidates: {}", candidates_str));
+                                        if let Some(ps_err) = ps_stderr {
+                                            if !ps_err.trim().is_empty() {
+                                                stderr_parts.push(format!("PowerShell stderr: {}", ps_err));
+                                            }
+                                        }
+                                        let stderr_msg = stderr_parts.join(" | ");
+                                        
+                                        return Ok(InstallResult {
+                                            success: false,
+                                            message: e.to_user_message(),
+                                            method: Some("install_inf_driver".to_string()),
+                                            stdout,
+                                            stderr: Some(stderr_msg),
+                                        });
+                                    }
+                                }
+                            } else {
+                                Err((e, ps_stderr))
+                            }
+                        } else {
+                            Err((e, ps_stderr))
+                        }
+                    } else {
+                        Err((e, ps_stderr))
+                    }
+                }
+            };
+            
+            // 处理驱动选择结果
+            match selected_driver_name_result {
+                Ok(driver_name) => Some(driver_name),
+                Err((e, ps_stderr)) => {
+                    // 如果 INF 已安装但找不到驱动，返回明确错误
+                    let mut stderr_parts = Vec::new();
+                    
+                    // 添加错误码前缀
+                    let error_code_msg = e.format_stderr_with_code(None).unwrap_or_default();
+                    if !error_code_msg.is_empty() {
+                        stderr_parts.push(error_code_msg);
+                    }
+                    
+                    // 如果 driver_path 存在且 INF 已安装，添加特殊提示
+                    if inf_installed {
+                        stderr_parts.push("INF 安装完成但驱动未注册成功，请检查 INF 文件是否正确".to_string());
+                    }
+                    
+                    // 添加候选列表
+                    let candidates_str = names.join(",");
+                    stderr_parts.push(format!("Candidates: {}", candidates_str));
+                    
+                    // 添加 PowerShell stderr（如果存在）
+                    if let Some(ps_err) = ps_stderr {
+                        if !ps_err.trim().is_empty() {
+                            stderr_parts.push(format!("PowerShell stderr: {}", ps_err));
+                        }
+                    }
+                    
+                    let stderr_msg = stderr_parts.join(" | ");
+                    
+                    return Ok(InstallResult {
+                        success: false,
+                        message: e.to_user_message(),
+                        method: None,
+                        stdout: None,
+                        stderr: Some(stderr_msg),
+                    });
+                }
+            }
+        }
+        None => {
+            // 如果没有找到匹配的 printer item，不进行校验（可能是通过其他方式安装，保持向后兼容）
+            None
+        }
+    };
+    
+    // 如果没有选中的驱动（配置文件加载失败或未找到匹配项），直接返回错误
+    let selected_driver = match selected_driver_name {
+        Some(driver) => driver,
+        None => {
+            return Err("无法从配置中获取 driver_names，请确保配置文件存在且包含该打印机的配置".to_string());
+        }
+    };
     
     // 从路径中提取 IP 地址（格式：\\192.168.x.x）
     let ip_address = path.trim_start_matches("\\\\").to_string();
@@ -712,6 +1483,7 @@ pub async fn install_printer_windows(
     
     // 调试日志：输出检测到的构建号和选择的安装方式
     eprintln!("[DEBUG] Windows 构建号: {}, 使用现代方法: {}", windows_build, use_modern_method);
+    eprintln!("[INFO] 本次安装是否执行了 INF 安装: {}", inf_installed);
     
     // 步骤1：删除旧打印机（如果存在）静默模式，忽略错误，隐藏窗口
     delete_existing_printer(&name);
@@ -746,8 +1518,8 @@ pub async fn install_printer_windows(
             }
         }
         
-        // 步骤2：查找通用驱动并添加打印机
-        Ok(add_printer_with_driver_modern(&name, &port_name, &ip_address))
+        // 步骤2：使用选中的驱动添加打印机
+        Ok(add_printer_with_driver_modern(&name, &port_name, &ip_address, &selected_driver))
     } else {
         eprintln!("[DEBUG] 使用 VBS 脚本方式安装");
         // Windows 7/8 使用 VBS 脚本方式（传统方式）
@@ -760,7 +1532,7 @@ pub async fn install_printer_windows(
             Err(result) => Ok(result),
             Ok(_) => {
                 // 步骤3：端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
-                Ok(add_printer_with_driver_vbs(&name, &port_name, &ip_address))
+                Ok(add_printer_with_driver_vbs(&name, &port_name, &ip_address, &selected_driver))
             }
         }
     }

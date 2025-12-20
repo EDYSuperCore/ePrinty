@@ -78,8 +78,13 @@ export default {
     handleInstall() {
       console.log('PrinterItem: 点击安装按钮', this.printer)
       this.installing = true
-      // 传递打印机对象给父组件
-      this.$emit('install', this.printer)
+
+      // 传一个 done 回调给父组件，父组件 finally 里调用它
+      const done = () => {
+        this.installing = false
+      }
+
+      this.$emit('install', this.printer, done)
     }
   }
 }

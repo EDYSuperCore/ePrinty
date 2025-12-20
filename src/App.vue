@@ -295,6 +295,40 @@
               </div>
             </div>
           </div>
+
+          <!-- 作者的其他作品 -->
+          <div v-if="otherProducts && otherProducts.length > 0" class="mt-6 pt-6 border-t border-gray-200">
+            <p class="text-xs text-gray-500 mb-3">作者的其他作品</p>
+            <div class="space-y-3">
+              <div
+                v-for="product in otherProducts"
+                :key="product.name"
+                class="flex items-start space-x-3"
+              >
+                <!-- 产品图标 -->
+                <div v-if="product.icon" class="flex-shrink-0">
+                  <img
+                    :src="product.icon"
+                    :alt="product.name"
+                    class="w-10 h-10 rounded-lg object-contain"
+                  />
+                </div>
+                <!-- 产品信息 -->
+                <div class="flex-1 min-w-0 flex items-start justify-between">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-900 mb-0.5">{{ product.name }}</p>
+                    <p class="text-xs text-gray-500">{{ product.description }}</p>
+                  </div>
+                  <button
+                    @click="openProductUrl(product.url)"
+                    class="ml-3 text-xs text-gray-600 hover:text-gray-900 underline flex-shrink-0"
+                  >
+                    了解更多
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 对话框底部 -->
@@ -787,6 +821,39 @@
 
         <!-- 调试日志内容 -->
         <div class="flex-1 overflow-hidden flex flex-col">
+          <!-- 高级设置区域 -->
+          <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+            <p class="text-xs font-semibold text-gray-600 mb-2">高级/调试设置</p>
+            <div class="space-y-2">
+              <!-- 驱动安装策略 -->
+              <div>
+                <label class="block text-xs text-gray-700 mb-1">驱动安装策略</label>
+                <div class="flex flex-col space-y-1">
+                  <label class="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      v-model="driverInstallPolicy"
+                      value="always"
+                      @change="saveDriverInstallPolicy"
+                      class="w-3 h-3 text-yellow-600 focus:ring-yellow-500"
+                    />
+                    <span class="text-xs text-gray-700">总是安装/更新 INF 驱动（稳定）</span>
+                  </label>
+                  <label class="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      v-model="driverInstallPolicy"
+                      value="reuse_if_installed"
+                      @change="saveDriverInstallPolicy"
+                      class="w-3 h-3 text-yellow-600 focus:ring-yellow-500"
+                    />
+                    <span class="text-xs text-gray-700">若系统已存在驱动则跳过 INF（更快，可能版本不一致）</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+          
           <!-- 日志类型筛选 -->
           <div class="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center space-x-1 flex-shrink-0">
             <span class="text-xs text-gray-600">筛选:</span>
@@ -893,7 +960,23 @@ export default {
       debugLogFilter: 'all', // 日志筛选：'all', 'log', 'info', 'warn', 'error'
       originalConsole: {}, // 保存原始的 console 方法
       showVersionUpdateDialog: false, // 显示版本更新对话框
-      versionUpdateInfo: null // 版本更新信息
+      versionUpdateInfo: null, // 版本更新信息
+      driverInstallPolicy: 'always', // 驱动安装策略：'always' | 'reuse_if_installed'
+      // 作者的其他作品
+      otherProducts: [
+      {
+          name: 'MeowDocs',
+          description: '本地优先的 Markdown 笔记与知识管理工具',
+          url: 'https://example.com/meowdocs',
+          icon: '/MeowDoc.png' // 图标路径（public 目录）
+        },
+        {
+          name: 'Across the Ocean to See You',
+          description: '漂洋过海来看你',
+          url: 'https://example.com/atotsy',
+          icon: '/Across.png' // 图标路径（public 目录）
+        }
+      ]
     }
   },
   computed: {
@@ -918,6 +1001,8 @@ export default {
     // 然后加载数据
     this.loadData()
     this.setupDebugMode()
+    // 加载驱动安装策略设置
+    this.loadDriverInstallPolicy()
   },
   beforeUnmount() {
     this.restoreConsole()
@@ -961,7 +1046,16 @@ export default {
             console.error('加载配置失败:', err)
             throw err
           }),
-          invoke('list_printers').catch(err => {
+          // 为 list_printers 增加 4s 超时，防止 Ricoh 打印机导致的卡死
+          Promise.race([
+            invoke('list_printers'),
+            new Promise((resolve) => {
+              setTimeout(() => {
+                console.warn('获取打印机列表超时（4秒），返回空列表')
+                resolve([]) // 超时返回空数组
+              }, 4000)
+            })
+          ]).catch(err => {
             console.warn('获取打印机列表失败:', err)
             return [] // 失败时返回空数组
           })
@@ -1156,7 +1250,8 @@ export default {
                   name: printer.name,
                   path: printer.path,
                   driverPath: driverPathParam,  // 改为 camelCase，匹配 Rust 端的参数名
-                  model: modelParam
+                  model: modelParam,
+                  driverInstallPolicy: this.driverInstallPolicy  // 驱动安装策略
                 }
                 
                 console.info('📤 调用后端安装函数')
@@ -1266,6 +1361,14 @@ export default {
                 this.statusType = 'error'
                 this.installProgress.currentStep = this.installProgress.steps.length
                 console.error('========================================')
+              }
+              finally {
+    // 关键：无论成功/失败/异常，都要释放按钮状态
+                if (typeof done === 'function') done()
+
+                setTimeout(() => {
+                  this.showInstallProgress = false
+                }, 2000)
               }
             },
             updateProgressStep(stepIndex, message) {
@@ -1398,6 +1501,18 @@ export default {
         this.statusType = 'error'
       }
     },
+    async openProductUrl(url) {
+      try {
+        // 使用 Rust 后端命令打开外部链接
+        await invoke('open_url', { url })
+      } catch (err) {
+        console.error('打开链接失败:', err)
+        // 如果 invoke 失败，尝试使用 window.open 作为降级方案
+        if (typeof window !== 'undefined' && window.open) {
+          window.open(url, '_blank')
+        }
+      }
+    },
     async confirmUpdate() {
       // 确认更新，调用后端保存远程配置
       try {
@@ -1475,6 +1590,30 @@ export default {
     },
     closeDebugWindow() {
       this.showDebugWindow = false
+    },
+    // 加载驱动安装策略设置
+    loadDriverInstallPolicy() {
+      try {
+        const saved = localStorage.getItem('driverInstallPolicy')
+        if (saved === 'always' || saved === 'reuse_if_installed') {
+          this.driverInstallPolicy = saved
+        } else {
+          // 默认值
+          this.driverInstallPolicy = 'always'
+        }
+      } catch (err) {
+        console.warn('加载驱动安装策略设置失败:', err)
+        this.driverInstallPolicy = 'always'
+      }
+    },
+    // 保存驱动安装策略设置
+    saveDriverInstallPolicy() {
+      try {
+        localStorage.setItem('driverInstallPolicy', this.driverInstallPolicy)
+        console.info(`驱动安装策略已保存: ${this.driverInstallPolicy}`)
+      } catch (err) {
+        console.error('保存驱动安装策略设置失败:', err)
+      }
     },
     enableDebugMode() {
       // 拦截 console 方法

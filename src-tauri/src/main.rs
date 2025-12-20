@@ -466,7 +466,8 @@ async fn install_printer(
     name: String, 
     path: String, 
     driverPath: Option<String>,  // 改为 camelCase，看看是否能解决问题
-    model: Option<String>
+    model: Option<String>,
+    driverInstallPolicy: Option<String>  // 驱动安装策略："always" | "reuse_if_installed"
 ) -> Result<InstallResult, String> {
     // 参数校验
     if name.trim().is_empty() {
@@ -474,7 +475,7 @@ async fn install_printer(
     }
     
     // 调用平台统一的安装入口
-    crate::platform::install_printer(name, path, driverPath, model).await
+    crate::platform::install_printer(name, path, driverPath, model, driverInstallPolicy).await
 }
 
 #[tauri::command]
