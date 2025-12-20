@@ -645,6 +645,52 @@ pub async fn install_printer_windows(
     #[allow(unused_variables)] model: Option<String>,
 ) -> Result<InstallResult, String> {
     
+    // 校验 driver_names 字段（早失败）
+    // 从配置文件中查找匹配的 printer item 并校验 driver_names
+    match crate::load_local_config() {
+        Ok((config, _)) => {
+            // 在所有 areas 中查找匹配的 printer item（通过 name 或 path 匹配）
+            let mut matched_printer: Option<&crate::Printer> = None;
+            for area in &config.areas {
+                for printer in &area.printers {
+                    if printer.name == name || printer.path == path {
+                        matched_printer = Some(printer);
+                        break;
+                    }
+                }
+                if matched_printer.is_some() {
+                    break;
+                }
+            }
+            
+            // 如果找到匹配的 printer item，校验 driver_names
+            if let Some(printer) = matched_printer {
+                // 检查 driver_names 是否存在且非空
+                match &printer.driver_names {
+                    None => {
+                        return Err("配置缺少 driver_names，请更新 printer_config.json".to_string());
+                    }
+                    Some(names) => {
+                        // 检查数组是否为空
+                        if names.is_empty() {
+                            return Err("配置缺少 driver_names，请更新 printer_config.json".to_string());
+                        }
+                        // 检查数组中的元素是否全部为空白（trim 后为空）
+                        let all_empty = names.iter().all(|n| n.trim().is_empty());
+                        if all_empty {
+                            return Err("driver_names 不能为空".to_string());
+                        }
+                    }
+                }
+            }
+            // 如果没有找到匹配的 printer item，不进行校验（可能是通过其他方式安装，保持向后兼容）
+        }
+        Err(e) => {
+            // 配置文件加载失败，不进行校验（保持向后兼容，允许通过其他方式安装）
+            eprintln!("[WARN] 无法加载配置文件进行 driver_names 校验: {}，跳过校验", e);
+        }
+    }
+    
     // 从路径中提取 IP 地址（格式：\\192.168.x.x）
     let ip_address = path.trim_start_matches("\\\\").to_string();
     

@@ -51,26 +51,28 @@ const BRAND_KEYWORDS: &[(&str, &[&str])] = &[
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PrinterConfig {
+pub struct PrinterConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>, // 配置文件版本号（可选，兼容旧版本）
     areas: Vec<Area>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Area {
+pub struct Area {
     name: String,
     printers: Vec<Printer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Printer {
-    name: String,
-    path: String,
+pub struct Printer {
+    pub name: String,
+    pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<String>, // 打印机型号（可选）
+    pub model: Option<String>, // 打印机型号（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
-    driver_path: Option<String>, // 驱动路径（可选，相对于应用目录）
+    pub driver_path: Option<String>, // 驱动路径（可选，相对于应用目录）
+    #[serde(default)]
+    pub driver_names: Option<Vec<String>>, // 驱动名称列表（可选，用于 Windows 安装校验）
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,7 +147,7 @@ pub struct VersionCheckResult {
 }
 
 // 加载本地配置文件，返回配置和文件路径
-fn load_local_config() -> Result<(PrinterConfig, std::path::PathBuf), String> {
+pub fn load_local_config() -> Result<(PrinterConfig, std::path::PathBuf), String> {
     use std::path::PathBuf;
     
     // 尝试从多个可能的位置加载本地配置
