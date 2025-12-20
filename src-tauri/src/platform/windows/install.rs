@@ -1,0 +1,722 @@
+// Windows 平台打印机安装模块
+// 该文件是 Windows 安装入口实现，分为 Add-Printer 与 VBS 分支
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::Write;
+
+
+// ============================================================================
+// 常量定义
+// ============================================================================
+
+// PowerShell 命令执行超时时间（秒）
+// 注意：当前实现中未使用，保留以备将来需要超时控制时使用
+#[allow(dead_code)]
+const POWERSHELL_TIMEOUT_SECS: u64 = 120; // 2分钟，用于打印机安装相关命令
+
+// 嵌入的 prnport.vbs 脚本内容（在编译时打包进 exe）
+// 注意：VBS 文件可能是 GBK/ANSI 编码，使用 include_bytes! 直接嵌入原始字节
+// 写入文件时保持原始编码，因为 VBScript 需要 ANSI/GBK 编码才能正确解析
+const PRNPORT_VBS_BYTES: &[u8] = include_bytes!("../../../scripts/prnport.vbs");
+
+// ============================================================================
+// 数据结构
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstallResult {
+    pub success: bool,
+    pub message: String,
+    pub method: Option<String>, // 安装方式："VBS" 或 "Add-Printer"
+    pub stdout: Option<String>,  // PowerShell 标准输出
+    pub stderr: Option<String>,  // PowerShell 错误输出
+}
+
+// ============================================================================
+// 错误类型
+// ============================================================================
+
+/// 打印机安装过程中的结构化错误类型
+#[derive(Debug)]
+enum InstallError {
+    /// 外部命令执行失败
+    CommandFailed {
+        step: &'static str,
+        command: String,
+        stderr: String,
+    },
+    /// PowerShell 命令执行失败
+    PowerShellFailed {
+        step: &'static str,
+        stderr: String,
+    },
+    /// 输入参数无效
+    InvalidInput {
+        field: &'static str,
+        reason: String,
+    },
+    /// 未找到打印机驱动
+    DriverNotFound {
+        step: &'static str,
+    },
+    /// 端口创建超时
+    PortCreateTimeout {
+        port_name: String,
+    },
+    /// 文件操作失败
+    FileOperationFailed {
+        step: &'static str,
+        operation: &'static str,
+        error: String,
+    },
+    /// 端口添加失败（现代方式）
+    PortAddFailedModern {
+        stdout: String,
+        stderr: String,
+    },
+    /// 端口添加失败（VBS 方式）
+    PortAddFailedVbs {
+        error_details: String,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+    },
+    /// VBS 脚本执行失败
+    VbsScriptFailed {
+        error: String,
+        script_info: String,
+    },
+    /// 打印机安装失败（现代方式）
+    PrinterInstallFailedModern {
+        stderr: String,
+    },
+    /// 打印机安装失败（VBS 方式）
+    PrinterInstallFailedVbs {
+        stderr: String,
+    },
+}
+
+impl InstallError {
+    /// 获取错误的稳定错误码
+    fn code(&self) -> &'static str {
+        match self {
+            InstallError::CommandFailed { .. } => "WIN_CMD_FAILED",
+            InstallError::PowerShellFailed { .. } => "WIN_PS_FAILED",
+            InstallError::InvalidInput { .. } => "WIN_INVALID_INPUT",
+            InstallError::DriverNotFound { .. } => "WIN_DRIVER_NOT_FOUND",
+            InstallError::PortCreateTimeout { .. } => "WIN_PORT_TIMEOUT",
+            InstallError::FileOperationFailed { .. } => "WIN_FILE_FAILED",
+            InstallError::PortAddFailedModern { .. } => "WIN_PORT_FAILED",
+            InstallError::PortAddFailedVbs { .. } => "WIN_PORT_FAILED",
+            InstallError::VbsScriptFailed { .. } => "WIN_VBS_FAILED",
+            InstallError::PrinterInstallFailedModern { .. } => "WIN_PRINTER_INSTALL_FAILED",
+            InstallError::PrinterInstallFailedVbs { .. } => "WIN_PRINTER_INSTALL_FAILED",
+        }
+    }
+
+    /// 获取错误的 stdout 和 stderr（如果存在）
+    fn get_output(&self) -> (Option<String>, Option<String>) {
+        match self {
+            InstallError::PortAddFailedModern { stdout, stderr } => {
+                (Some(stdout.clone()), Some(stderr.clone()))
+            }
+            InstallError::PortAddFailedVbs { stdout, stderr, .. } => {
+                (Some(stdout.clone()), Some(stderr.clone()))
+            }
+            _ => (None, None),
+        }
+    }
+
+    /// 为 stderr 添加错误码前缀
+    fn format_stderr_with_code(&self, stderr: Option<String>) -> Option<String> {
+        let code = self.code();
+        match stderr {
+            Some(s) if !s.trim().is_empty() => {
+                Some(format!("[EASYPRINTER_CODE={}] {}", code, s))
+            }
+            _ => Some(format!("[EASYPRINTER_CODE={}]", code)),
+        }
+    }
+
+    /// 将错误转换为用户友好的错误消息
+    /// 返回与当前实现完全一致的错误文案（逐字一致）
+    fn to_user_message(&self) -> String {
+        match self {
+            InstallError::CommandFailed { step: _, command, stderr } => {
+                format!("执行 {} 命令失败: {}", command, stderr)
+            }
+            InstallError::PowerShellFailed { step, stderr } => {
+                // 保持与原始错误消息格式一致
+                // 原始代码中，run_powershell 返回的 Err(String) 已经是完整错误消息
+                // 但在某些地方会再次包装，需要根据 step 来决定格式
+                match *step {
+                    "add_printer_port_modern" => format!("执行 Add-PrinterPort 命令失败: {}", stderr),
+                    "add_printer_with_driver_modern" => format!("端口添加成功，但执行 Add-Printer 命令失败: {}", stderr),
+                    "add_printer_with_driver_vbs" => format!("端口添加成功，但执行 PowerShell 命令失败: {}", stderr),
+                    _ => stderr.clone(),
+                }
+            }
+            InstallError::InvalidInput { field, reason } => {
+                format!("输入参数 {} 无效: {}", field, reason)
+            }
+            InstallError::DriverNotFound { step: _ } => {
+                "系统中没有可用的打印机驱动。请先安装打印机驱动。".to_string()
+            }
+            InstallError::PortCreateTimeout { port_name: _ } => {
+                "端口创建超时".to_string()
+            }
+            InstallError::FileOperationFailed { step: _, operation, error } => {
+                match *operation {
+                    "创建临时脚本文件" => format!("创建临时脚本文件失败: {}", error),
+                    "写入脚本内容" => format!("写入脚本内容失败: {}", error),
+                    "同步脚本文件" => format!("同步脚本文件失败: {}", error),
+                    _ => format!("文件操作失败: {}", error),
+                }
+            }
+            InstallError::PortAddFailedModern { stdout, stderr } => {
+                format!("添加打印机端口失败。标准输出: {}。错误信息: {}。请确保有管理员权限。", stdout, stderr)
+            }
+            InstallError::PortAddFailedVbs { error_details, exit_code, stdout: _, stderr: _ } => {
+                format!("添加打印机端口失败。{} | 退出代码: {}", error_details, exit_code)
+            }
+            InstallError::VbsScriptFailed { error, script_info } => {
+                format!("执行 prnport.vbs 脚本失败: {} | {}", error, script_info)
+            }
+            InstallError::PrinterInstallFailedModern { stderr } => {
+                format!("端口添加成功，但打印机安装失败。错误信息: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", stderr)
+            }
+            InstallError::PrinterInstallFailedVbs { stderr } => {
+                format!("端口添加成功，但打印机安装失败。错误信息: {}。请确保系统中已安装打印机驱动，或联系管理员安装驱动。", stderr)
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
+// 使用 encoding 模块的 decode_windows_string
+use crate::platform::windows::encoding::decode_windows_string;
+
+// 注意：以下辅助函数在当前实现中未使用，但保留以备将来需要时使用
+// format_command_error 和 run_cscript_hidden 函数已移除，因为当前实现直接使用 Command 和 decode_windows_string
+
+/// 检测 Windows 版本（返回构建号，用于判断是否支持 Add-PrinterPort）
+/// 注意：GetVersionExW API 在 Windows 10+ 可能返回兼容版本信息（如 9200），不准确
+/// 因此优先使用 PowerShell 获取真实版本信息
+fn get_windows_build_number() -> Result<u32, String> {
+    // 优先使用 PowerShell 检测真实构建号（更可靠）
+    // 使用 Get-CimInstance 获取真实的操作系统版本信息
+    match super::ps::run_powershell("(Get-CimInstance Win32_OperatingSystem).BuildNumber") {
+        Ok(output) => {
+            let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            
+            if !version_str.is_empty() {
+                if let Ok(build_number) = version_str.parse::<u32>() {
+                    return Ok(build_number);
+                }
+            }
+        }
+        Err(_) => {}
+    }
+    
+    // 备用方案：使用 Environment.OSVersion
+    match super::ps::run_powershell("[System.Environment]::OSVersion.Version.Build") {
+        Ok(output) => {
+            let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            
+            if !version_str.is_empty() {
+                if let Ok(build_number) = version_str.parse::<u32>() {
+                    return Ok(build_number);
+                }
+            }
+        }
+        Err(_) => {}
+    }
+    
+    // 最后的备用方案：使用 GetVersionExW（但可能不准确）
+    use winapi::um::sysinfoapi::GetVersionExW;
+    use winapi::um::winnt::OSVERSIONINFOW;
+    
+    unsafe {
+        let mut os_info: OSVERSIONINFOW = std::mem::zeroed();
+        os_info.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+        
+        if GetVersionExW(&mut os_info) != 0 {
+            Ok(os_info.dwBuildNumber)
+        } else {
+            Err("无法检测 Windows 构建号".to_string())
+        }
+    }
+}
+
+// ============================================================================
+// 私有辅助类型
+// ============================================================================
+
+/// 端口添加结果
+#[derive(Debug, Clone, Copy)]
+enum PortAddOutcome {
+    /// 端口已创建
+    Created,
+    /// 端口已存在
+    AlreadyExists,
+}
+
+// ============================================================================
+// 私有辅助函数
+// ============================================================================
+
+/// 删除已存在的打印机（如果存在）
+/// 静默模式，忽略错误，隐藏窗口
+fn delete_existing_printer(name: &str) {
+    // rundll32 的 /q 参数会静默执行，不会显示窗口
+    // 使用 CREATE_NO_WINDOW 标志确保在打包后也不显示窗口
+    let printer_name_arg = format!("\"{}\"", name);
+    let _ = super::cmd::run_command("rundll32", &[
+        "printui.dll,PrintUIEntry",
+        "/dl",  // 删除本地打印机
+        "/n",   // 打印机名称
+        &printer_name_arg,
+        "/q"    // 静默模式，不显示确认对话框
+    ]);
+}
+
+/// 验证打印机端口是否存在
+/// 重试几次，因为端口创建可能需要时间
+fn verify_printer_port(port_name: &str) -> Result<bool, InstallError> {
+    let mut port_verified = false;
+    for attempt in 1..=3 {
+        eprintln!("[DEBUG] 验证端口存在（尝试 {}/3）", attempt);
+        
+        let verify_port_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $port = Get-PrinterPort -Name '{}' -ErrorAction SilentlyContinue; if ($port) {{ Write-Output 'PortVerified' }} else {{ Write-Error 'Port not found' }}",
+            port_name.replace("'", "''")
+        );
+        let verify_port = super::ps::run_powershell(&verify_port_script);
+        
+        match verify_port {
+            Ok(verify_result) => {
+                let verify_stdout = decode_windows_string(&verify_result.stdout);
+                if verify_stdout.contains("PortVerified") {
+                    eprintln!("[DEBUG] 端口验证成功");
+                    port_verified = true;
+                    break;
+                } else {
+                    eprintln!("[DEBUG] 端口验证失败，等待后重试...");
+                    if attempt < 3 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[DEBUG] 无法验证端口，等待后重试...");
+                // 如果是最后一次尝试，返回错误
+                if attempt == 3 {
+                    return Err(InstallError::PowerShellFailed {
+                        step: "verify_printer_port",
+                        stderr: e,
+                    });
+                }
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    Ok(port_verified)
+}
+
+/// 使用现代方式（Add-PrinterPort）添加打印机端口
+fn add_printer_port_modern(port_name: &str, ip_address: &str) -> Result<PortAddOutcome, InstallError> {
+    eprintln!("[DEBUG] 添加打印机端口 {}", port_name);
+    let port_add_script = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Add-PrinterPort -Name '{}' -PrinterHostAddress '{}' -ErrorAction Stop; Write-Output 'PortSuccess' }} catch {{ if ($_.Exception.Message -like '*already exists*' -or $_.Exception.Message -like '*已存在*') {{ Write-Output 'PortExists' }} else {{ Write-Error $_.Exception.Message }} }}",
+        port_name.replace("'", "''"),
+        ip_address.replace("'", "''")
+    );
+    let port_add_result = super::ps::run_powershell(&port_add_script);
+    
+    match port_add_result {
+        Ok(port_result) => {
+            let port_stdout = decode_windows_string(&port_result.stdout);
+            let port_stderr = decode_windows_string(&port_result.stderr);
+            
+            // 检查是否成功或端口已存在
+            let port_created = port_result.status.success() && port_stdout.contains("PortSuccess");
+            let port_exists = port_stdout.contains("PortExists")
+                || port_stderr.contains("already exists")
+                || port_stderr.contains("已存在");
+            
+            if !port_created && !port_exists {
+                // 端口添加失败
+                return Err(InstallError::PortAddFailedModern {
+                    stdout: port_stdout,
+                    stderr: port_stderr,
+                });
+            }
+            
+            // 确定端口是新建还是已存在
+            let outcome = if port_created {
+                eprintln!("[DEBUG] 端口创建成功: {}", port_stdout);
+                PortAddOutcome::Created
+            } else {
+                eprintln!("[DEBUG] 端口已存在: {}", port_stdout);
+                PortAddOutcome::AlreadyExists
+            };
+            
+            // 验证端口确实存在（重试几次，因为端口创建可能需要时间）
+            match verify_printer_port(port_name) {
+                Ok(verified) => {
+                    if !verified {
+                        eprintln!("[DEBUG] 警告：端口验证失败，但继续尝试添加打印机");
+                    }
+                    Ok(outcome)
+                }
+                Err(e) => {
+                    // 验证失败，但如果是端口已存在的情况，可能只是验证命令失败，继续执行
+                    if matches!(outcome, PortAddOutcome::AlreadyExists) {
+                        eprintln!("[DEBUG] 警告：端口验证失败，但端口可能已存在，继续尝试添加打印机");
+                        Ok(outcome)
+                    } else {
+                        // 端口刚创建但验证失败，返回验证错误
+                        Err(e)
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            Err(InstallError::PowerShellFailed {
+                step: "add_printer_port_modern",
+                stderr: e,
+            })
+        }
+    }
+}
+
+/// 使用现代方式添加打印机（查找驱动并添加）
+fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str) -> InstallResult {
+    // 查找通用驱动并添加打印机
+    let printer_script = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -DriverName $drivers.Name -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -DriverName $firstDriver -PortName '{}' -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
+        name.replace("'", "''"),
+        port_name.replace("'", "''"),
+        name.replace("'", "''"),
+        port_name.replace("'", "''")
+    );
+    let printer_output = super::ps::run_powershell(&printer_script);
+    
+    match printer_output {
+        Ok(printer_result) => {
+            let printer_stdout = decode_windows_string(&printer_result.stdout);
+            let printer_stderr = decode_windows_string(&printer_result.stderr);
+            
+            if printer_result.status.success() || printer_stdout.contains("Success") {
+                InstallResult {
+                    success: true,
+                    message: format!("打印机 {} ({}) 安装成功", name, ip_address),
+                    method: Some("Add-Printer".to_string()),
+                    stdout: Some(printer_stdout),
+                    stderr: Some(printer_stderr),
+                }
+            } else {
+                let error = InstallError::PrinterInstallFailedModern {
+                    stderr: printer_stderr.clone(),
+                };
+                InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: Some("Add-Printer".to_string()),
+                    stdout: Some(printer_stdout),
+                    stderr: error.format_stderr_with_code(Some(printer_stderr)),
+                }
+            }
+        }
+        Err(e) => {
+            let error = InstallError::PowerShellFailed {
+                step: "add_printer_with_driver_modern",
+                stderr: e,
+            };
+            InstallResult {
+                success: false,
+                message: error.to_user_message(),
+                method: Some("Add-Printer".to_string()),
+                stdout: None,
+                stderr: error.format_stderr_with_code(None),
+            }
+        }
+    }
+}
+
+/// 将 VBS 脚本写入临时文件
+fn write_vbs_script_to_temp() -> Result<std::path::PathBuf, InstallError> {
+    // 将嵌入的 VBS 脚本写入临时文件
+    // 重要：直接写入原始字节，不要进行编码转换，因为 VBScript 需要 ANSI/GBK 编码
+    let temp_dir = std::env::temp_dir();
+    let script_path = temp_dir.join("prnport.vbs");
+    
+    // 直接写入原始字节（保持原始编码，ANSI/GBK）
+    let mut file = fs::File::create(&script_path)
+        .map_err(|e| InstallError::FileOperationFailed {
+            step: "write_vbs_script_to_temp",
+            operation: "创建临时脚本文件",
+            error: e.to_string(),
+        })?;
+    file.write_all(PRNPORT_VBS_BYTES)
+        .map_err(|e| InstallError::FileOperationFailed {
+            step: "write_vbs_script_to_temp",
+            operation: "写入脚本内容",
+            error: e.to_string(),
+        })?;
+    file.sync_all()
+        .map_err(|e| InstallError::FileOperationFailed {
+            step: "write_vbs_script_to_temp",
+            operation: "同步脚本文件",
+            error: e.to_string(),
+        })?;
+    drop(file); // 确保文件已关闭
+    
+    Ok(script_path)
+}
+
+/// 使用 VBS 脚本方式添加打印机端口
+fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_address: &str) -> Result<InstallResult, InstallResult> {
+    // 使用 cscript 运行 prnport.vbs 脚本添加端口（隐藏窗口）
+    // 参数参考：cscript prnport.vbs -a -r IP_192.168.x.x -h 192.168.x.x -o raw
+    // 注意：移除 //B 参数以便捕获错误信息
+    let script_path_str = script_path.to_str().unwrap();
+    let output = super::cmd::run_command("cscript", &[
+        "//NoLogo",  // 不显示脚本横幅
+        script_path_str,
+        "-a",        // 添加端口
+        "-r",        // 端口名
+        port_name,   // 端口名称
+        "-h",        // IP地址
+        ip_address,  // IP地址值
+        "-o",        // 输出类型
+        "raw"        // raw 类型
+    ]);
+    
+    match output {
+        Ok(result) => {
+            // 执行完毕后删除临时文件
+            let _ = std::fs::remove_file(script_path);
+            
+            let stdout = decode_windows_string(&result.stdout);
+            let stderr = decode_windows_string(&result.stderr);
+            
+            if result.status.success() {
+                Ok(InstallResult {
+                    success: true,
+                    message: String::new(),
+                    method: None,
+                    stdout: Some(stdout),
+                    stderr: Some(stderr),
+                })
+            } else {
+                // 组合详细的错误信息
+                let error_details = if stderr.trim().is_empty() && stdout.trim().is_empty() {
+                    format!("cscript 退出代码 {}", result.status.code().unwrap_or(-1))
+                } else {
+                    format!("错误输出: {} | 标准输出: {}", 
+                        if stderr.trim().is_empty() { "无" } else { &stderr },
+                        if stdout.trim().is_empty() { "无" } else { &stdout }
+                    )
+                };
+                
+                let exit_code = result.status.code().unwrap_or(-1);
+                let error = InstallError::PortAddFailedVbs {
+                    error_details: error_details.clone(),
+                    exit_code,
+                    stdout: stdout.clone(),
+                    stderr: stderr.clone(),
+                };
+                
+                Err(InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: Some("VBS".to_string()),
+                    stdout: Some(stdout),
+                    stderr: error.format_stderr_with_code(Some(stderr)),
+                })
+            }
+        }
+        Err(e) => {
+            // 执行失败时也删除临时文件
+            let _ = std::fs::remove_file(script_path);
+            
+            // 检查脚本文件是否存在
+            let script_exists = script_path.exists();
+            let script_info = if script_exists {
+                format!("脚本文件存在，大小 {} 字节", 
+                    std::fs::metadata(script_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                )
+            } else {
+                "脚本文件不存在".to_string()
+            };
+            
+            let error = InstallError::VbsScriptFailed {
+                error: e,
+                script_info: script_info.clone(),
+            };
+            
+            Err(InstallResult {
+                success: false,
+                message: error.to_user_message(),
+                method: Some("VBS".to_string()),
+                stdout: None,
+                stderr: error.format_stderr_with_code(None),
+            })
+        }
+    }
+}
+
+/// 使用 VBS 方式添加打印机（查找驱动并添加）
+fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str) -> InstallResult {
+    // 端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
+    let ps_script = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $port = '{}'; $drivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like '*Generic*' -or $_.Name -like '*Text*' -or $_.Name -like '*HP*' -or $_.Name -like '*RICOH*' -or $_.Name -like '*PCL*' -or $_.Name -like '*PostScript*' }} | Select-Object -First 1; if ($drivers) {{ try {{ Add-Printer -Name '{}' -PortName $port -DriverName $drivers.Name -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ $allDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue; if ($allDrivers) {{ $firstDriver = ($allDrivers | Select-Object -First 1).Name; try {{ Add-Printer -Name '{}' -PortName $port -DriverName $firstDriver -ErrorAction Stop; Write-Output 'Success' }} catch {{ Write-Error $_.Exception.Message }} }} else {{ Write-Error '系统中没有可用的打印机驱动。请先安装打印机驱动。' }} }}",
+        port_name,
+        name.replace("'", "''"),
+        name.replace("'", "''")
+    );
+    let ps_output = super::ps::run_powershell(&ps_script);
+    
+    match ps_output {
+        Ok(ps_result) => {
+            let ps_stdout = decode_windows_string(&ps_result.stdout);
+            let ps_stderr = decode_windows_string(&ps_result.stderr);
+            
+            if ps_result.status.success() || ps_stdout.contains("Success") {
+                InstallResult {
+                    success: true,
+                    message: format!("打印机 {} ({}) 安装成功", name, ip_address),
+                    method: Some("VBS".to_string()),
+                    stdout: Some(ps_stdout),
+                    stderr: Some(ps_stderr),
+                }
+            } else {
+                let error = InstallError::PrinterInstallFailedVbs {
+                    stderr: ps_stderr.clone(),
+                };
+                InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: Some("VBS".to_string()),
+                    stdout: Some(ps_stdout),
+                    stderr: error.format_stderr_with_code(Some(ps_stderr)),
+                }
+            }
+        }
+        Err(e) => {
+            let error = InstallError::PowerShellFailed {
+                step: "add_printer_with_driver_vbs",
+                stderr: e,
+            };
+            InstallResult {
+                success: false,
+                message: error.to_user_message(),
+                method: Some("VBS".to_string()),
+                stdout: None,
+                stderr: error.format_stderr_with_code(None),
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 主函数
+// ============================================================================
+
+/// Windows 平台打印机安装入口
+/// 
+/// 根据 Windows 版本自动选择安装方式：
+/// - Windows 10+ (构建号 >= 10240): 使用 Add-PrinterPort + Add-Printer
+/// - Windows 7/8 (构建号 < 10240): 使用 VBS 脚本 + Add-Printer
+#[allow(non_snake_case)]
+pub async fn install_printer_windows(
+    name: String,
+    path: String,
+    #[allow(unused_variables)] driverPath: Option<String>,
+    #[allow(unused_variables)] model: Option<String>,
+) -> Result<InstallResult, String> {
+    
+    // 从路径中提取 IP 地址（格式：\\192.168.x.x）
+    let ip_address = path.trim_start_matches("\\\\").to_string();
+    
+    // 端口名格式：IP_IP地址（用下划线替换点）
+    let port_name = format!("IP_{}", ip_address.replace(".", "_"));
+    
+    // 检测 Windows 构建号来判断是否支持 Add-PrinterPort
+    // Windows 10 (10240+) 和 Windows 11 (22000+) 都支持 Add-PrinterPort
+    let windows_build = get_windows_build_number().unwrap_or(0);
+    
+    // 如果构建号为 0（检测失败），默认使用现代方法（因为可能是 Windows 10+）
+    // 只有在明确检测到旧版本 Windows（构建号 < 10240）时才使用 VBS
+    let use_modern_method = if windows_build == 0 {
+        eprintln!("[DEBUG] 构建号检测失败，默认使用现代方法（Add-PrinterPort）");
+        true // 默认使用现代方法
+    } else {
+        windows_build >= 10240 // Windows 10+ 使用新方法（包括 Windows 11）
+    };
+    
+    // 调试日志：输出检测到的构建号和选择的安装方式
+    eprintln!("[DEBUG] Windows 构建号: {}, 使用现代方法: {}", windows_build, use_modern_method);
+    
+    // 步骤1：删除旧打印机（如果存在）静默模式，忽略错误，隐藏窗口
+    delete_existing_printer(&name);
+    
+    // 根据 Windows 版本选择安装方式
+    eprintln!("[DEBUG] 准备选择安装方式，use_modern_method = {}", use_modern_method);
+    if use_modern_method {
+        eprintln!("[DEBUG] 使用 Add-PrinterPort 方式安装");
+        // Windows 10+ 使用 Add-PrinterPort + Add-Printer（现代方式）
+        // 步骤1：添加打印机端口（如果不存在则创建，如果已存在则忽略错误）
+        match add_printer_port_modern(&port_name, &ip_address) {
+            Err(e) => {
+                // 端口添加失败，构造 InstallResult 并返回
+                let (stdout, stderr) = e.get_output();
+                return Ok(InstallResult {
+                    success: false,
+                    message: e.to_user_message(),
+                    method: Some("Add-Printer".to_string()),
+                    stdout,
+                    stderr: e.format_stderr_with_code(stderr),
+                });
+            }
+            Ok(outcome) => {
+                match outcome {
+                    PortAddOutcome::Created => {
+                        eprintln!("[DEBUG] 端口创建成功，继续安装打印机");
+                    }
+                    PortAddOutcome::AlreadyExists => {
+                        eprintln!("[DEBUG] 端口已存在，继续安装打印机");
+                    }
+                }
+            }
+        }
+        
+        // 步骤2：查找通用驱动并添加打印机
+        Ok(add_printer_with_driver_modern(&name, &port_name, &ip_address))
+    } else {
+        eprintln!("[DEBUG] 使用 VBS 脚本方式安装");
+        // Windows 7/8 使用 VBS 脚本方式（传统方式）
+        // 步骤1：将嵌入的 VBS 脚本写入临时文件
+        let script_path = write_vbs_script_to_temp()
+            .map_err(|e| e.to_user_message())?;
+        
+        // 步骤2：使用 cscript 运行 prnport.vbs 脚本添加端口
+        match add_printer_port_vbs(&script_path, &port_name, &ip_address) {
+            Err(result) => Ok(result),
+            Ok(_) => {
+                // 步骤3：端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
+                Ok(add_printer_with_driver_vbs(&name, &port_name, &ip_address))
+            }
+        }
+    }
+}
+
