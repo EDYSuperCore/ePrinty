@@ -1,4 +1,4 @@
-# 易点云打印机安装小精灵
+# ePrinty - 让打印这件事，简单一点
 
 基于 **Tauri + Vue 3 + TailwindCSS** 开发的跨平台桌面应用，用于企业内网打印机的安装与管理。
 
@@ -110,7 +110,7 @@ npm run tauri build
 ```
 
 构建输出：
-- Windows: `src-tauri/target/release/易点云打印机安装小精灵.exe`
+- Windows: `src-tauri/target/release/ePrinty.exe`
 - macOS: `src-tauri/target/release/bundle/macos/easy-printer.app`
 - 可执行文件位于：`src-tauri/target/release/`
 - 配置文件会自动复制到输出目录：`src-tauri/target/release/printer_config.json`
@@ -385,8 +385,8 @@ cargo build --verbose
 
 1. **主可执行文件**（必需）
    ```
-   易点云打印机安装小精灵.exe
-   位置：src-tauri/target/release/易点云打印机安装小精灵.exe
+   ePrinty.exe
+   位置：src-tauri/target/release/ePrinty.exe
    ```
 
 2. **配置文件**（必需）

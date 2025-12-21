@@ -61,30 +61,17 @@ export default {
     isInstalled: {
       type: Boolean,
       default: false
-    }
-  },
-  data() {
-    return {
-      installing: false
-    }
-  },
-  watch: {
-    // 当安装状态改变时，重置安装中状态
-    isInstalled() {
-      this.installing = false
+    },
+    installing: {
+      type: Boolean,
+      default: false
     }
   },
   methods: {
     handleInstall() {
       console.log('PrinterItem: 点击安装按钮', this.printer)
-      this.installing = true
-
-      // 传一个 done 回调给父组件，父组件 finally 里调用它
-      const done = () => {
-        this.installing = false
-      }
-
-      this.$emit('install', this.printer, done)
+      // 直接触发 install 事件，安装状态由父组件 App.vue 统一管理
+      this.$emit('install', this.printer)
     }
   }
 }

@@ -1,20 +1,9 @@
 <template>
-  <div class="flex flex-col h-screen bg-gray-50" @contextmenu.prevent>
-    <!-- 顶部标题 -->
-    <header class="bg-white border-b border-gray-200 px-6 py-4 backdrop-blur-xl bg-white/80">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <div class="bg-gray-100 rounded-lg p-2">
-            <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-xl font-semibold text-gray-900">易点云打印机安装小精灵</h1>
-            <p class="text-xs text-gray-500 mt-0.5">企业内网打印机管理工具</p>
-          </div>
-        </div>
-        <div class="flex items-center space-x-2">
+<div class="app-frame">
+  <div class="app-shell">
+<AppTitleBar>
+  <template #actions>
+    <div class="flex items-center space-x-2">
           <!-- 调试模式按钮 -->
           <button
             @click="toggleDebugMode"
@@ -34,16 +23,16 @@
               {{ debugLogs.length }}
             </span>
           </button>
-          <!-- 帮助按钮 -->
+          <!-- 关于按钮 -->
           <button
             @click="showHelp = true"
             class="flex items-center space-x-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-all duration-200"
-            title="帮助"
+            title="关于"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>帮助</span>
+            <span>关于</span>
           </button>
           <!-- IT热线按钮 -->
           <button
@@ -56,9 +45,10 @@
             <span>IT热线</span>
           </button>
         </div>
-      </div>
-    </header>
-
+  </template>
+</AppTitleBar>
+    <div class="app-content">
+  <div class="flex flex-col h-full bg-gray-50" @contextmenu.prevent>
     <!-- 主体内容 -->
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧：办公区选择器 -->
@@ -191,6 +181,7 @@
                 :key="printer.name"
                 :printer="printer"
                 :is-installed="isInstalled(printer.name)"
+                :installing="installingPrinters.has(printer.name)"
                 @install="handleInstall"
               />
             </div>
@@ -246,7 +237,7 @@
     >
       <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
         <!-- 对话框标题 -->
-        <div class="bg-gray-50 border-b border-gray-200 px-6 py-4">
+        <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 relative z-10">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-900">关于</h3>
             <button
@@ -263,14 +254,12 @@
         <!-- 对话框内容 -->
         <div class="px-6 py-6">
           <div class="flex items-center space-x-4 mb-6">
-            <div class="bg-gray-100 rounded-xl p-4">
-              <svg class="w-10 h-10 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
+            <div class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
+              <img src="/icon.png" alt="ePrinty" class="w-full h-full object-contain p-2" />
             </div>
             <div>
-              <h4 class="text-xl font-semibold text-gray-900">易点云打印机安装小精灵</h4>
-              <p class="text-sm text-gray-500 mt-1">企业内网打印机管理工具</p>
+              <h4 class="text-xl font-semibold text-gray-900">ePrinty</h4>
+              <p class="text-sm text-gray-500 mt-1">让打印这件事，简单一点</p>
             </div>
           </div>
 
@@ -306,11 +295,11 @@
                 class="flex items-start space-x-3"
               >
                 <!-- 产品图标 -->
-                <div v-if="product.icon" class="flex-shrink-0">
+                <div v-if="product.icon" class="flex-shrink-0 w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden">
                   <img
                     :src="product.icon"
                     :alt="product.name"
-                    class="w-10 h-10 rounded-lg object-contain"
+                    class="w-full h-full object-contain"
                   />
                 </div>
                 <!-- 产品信息 -->
@@ -913,16 +902,21 @@
       </div>
     </div>
   </div>
+  </div>
+  </div>
+  </div>
 </template>
 
 <script>
 import { invoke } from '@tauri-apps/api/tauri'
 import PrinterItem from './components/PrinterItem.vue'
+import AppTitleBar from "./components/AppTitleBar.vue";
 
 export default {
   name: 'App',
   components: {
-    PrinterItem
+    PrinterItem,
+    AppTitleBar
   },
   data() {
     return {
@@ -935,11 +929,12 @@ export default {
       statusType: 'info', // 'info', 'success', 'error'
       dingtalkIcon: '/dingtalk_icon.png', // 钉钉图标路径（从 public 目录）
       showHelp: false, // 显示帮助对话框
-      version: '1.2.0', // 软件版本号
+      version: '1.4.0', // 软件版本号
       showUpdateDialog: false, // 显示更新对话框
       pendingRemoteConfig: null, // 待更新的远程配置
       localVersion: '', // 本地版本号
       remoteVersion: '', // 远程版本号
+      installingPrinters: new Set(), // 正在安装的打印机名称集合（统一管理安装状态）
       showInstallProgress: false, // 显示安装进度对话框
       installProgress: {
         printerName: '',
@@ -1126,6 +1121,9 @@ export default {
       await this.loadData()
     },
             async handleInstall(printer) {
+              // 开始安装：添加到 installingPrinters Set
+              this.installingPrinters.add(printer.name)
+              
               console.info('========================================')
               console.info(`🚀 开始安装打印机: ${printer.name}`)
               console.info(`📍 打印机路径: ${printer.path}`)

@@ -6,6 +6,7 @@ use std::os::windows::process::CommandExt;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use tauri::Manager;
 
 mod exec;
 mod platform;
@@ -258,53 +259,89 @@ fn config_different(local: &PrinterConfig, remote: &PrinterConfig) -> bool {
 }
 
 // 加载打印机配置（默认加载本地，后台检查远程更新）
+// 当本地配置存在时：立即返回，不等待远程请求；远程检查在后台执行并通过事件通知
 #[tauri::command]
-async fn load_config() -> Result<LoadConfigResult, String> {
+async fn load_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> {
     // 优先加载本地配置
     match load_local_config() {
         Ok((local_config, _config_path)) => {
             let local_version = local_config.version.clone();
             
-            // 本地配置加载成功，后台尝试加载远程配置进行对比
-            // 使用 tokio::time::timeout 确保不会无限等待
-            let remote_result = tokio::time::timeout(
-                std::time::Duration::from_secs(6), // 6秒总超时
-                load_remote_config()
-            ).await;
+            // 本地配置加载成功，立即返回，不等待远程请求
+            // 远程配置检查在后台执行，通过 tauri event 通知前端
             
-            let (has_update, remote_config, remote_version, remote_error) = match remote_result {
-                Ok(Ok(remote_config)) => {
-                    let remote_version = remote_config.version.clone();
-                    
-                    // 比较配置是否不同
-                    if config_different(&local_config, &remote_config) {
-                        eprintln!("[INFO] 检测到远程配置更新 (本地: {:?}, 远程: {:?})", 
-                            local_version.as_ref().unwrap_or(&"未知".to_string()),
-                            remote_version.as_ref().unwrap_or(&"未知".to_string())
-                        );
-                        (true, Some(remote_config), remote_version, None)
-                    } else {
-                        (false, None, remote_version, None)
+            // 后台执行远程配置检查（non-blocking）
+            let app_clone = app.clone();
+            let local_config_clone = local_config.clone();
+            let local_version_clone = local_version.clone(); // 克隆用于闭包
+            tauri::async_runtime::spawn(async move {
+                // 使用较短的 timeout（1500ms）避免后台任务长期占用
+                let remote_result = tokio::time::timeout(
+                    std::time::Duration::from_millis(1500),
+                    load_remote_config()
+                ).await;
+                
+                match remote_result {
+                    Ok(Ok(remote_config)) => {
+                        let remote_version = remote_config.version.clone();
+                        
+                        // 比较配置是否不同
+                        if config_different(&local_config_clone, &remote_config) {
+                            eprintln!("[INFO] 检测到远程配置更新 (本地: {:?}, 远程: {:?})", 
+                                local_version_clone.as_ref().unwrap_or(&"未知".to_string()),
+                                remote_version.as_ref().unwrap_or(&"未知".to_string())
+                            );
+                            
+                            // 发送更新事件通知前端
+                            let payload = serde_json::json!({
+                                "has_update": true,
+                                "local_version": local_version_clone,
+                                "remote_version": remote_version,
+                            });
+                            
+                            if let Err(e) = app_clone.emit_all("config_remote_update", payload) {
+                                eprintln!("[WARN] 发送 config_remote_update 事件失败: {}", e);
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        // 远程加载失败，只记录日志
+                        eprintln!("[WARN] 远程配置加载失败: {}（已使用本地配置）", e);
+                        
+                        // 可选：发送错误事件
+                        let payload = serde_json::json!({
+                            "error": format!("远程配置加载失败: {}", e),
+                        });
+                        
+                        if let Err(emit_err) = app_clone.emit_all("config_remote_error", payload) {
+                            eprintln!("[WARN] 发送 config_remote_error 事件失败: {}", emit_err);
+                        }
+                    }
+                    Err(_) => {
+                        // 超时，只记录日志
+                        eprintln!("[WARN] 远程配置加载超时（已使用本地配置）");
+                        
+                        // 可选：发送错误事件
+                        let payload = serde_json::json!({
+                            "error": "远程配置加载超时",
+                        });
+                        
+                        if let Err(emit_err) = app_clone.emit_all("config_remote_error", payload) {
+                            eprintln!("[WARN] 发送 config_remote_error 事件失败: {}", emit_err);
+                        }
                     }
                 }
-                Ok(Err(e)) => {
-                    // 远程加载失败，只记录错误，不影响使用
-                    (false, None, None, Some(format!("远程配置加载失败: {}（已使用本地配置）", e)))
-                }
-                Err(_) => {
-                    // 超时，使用本地配置
-                    (false, None, None, Some("远程配置加载超时（已使用本地配置）".to_string()))
-                }
-            };
+            });
             
+            // 立即返回本地配置，不等待远程请求
             Ok(LoadConfigResult {
                 config: local_config,
                 source: "local".to_string(),
-                remote_error,
-                has_remote_update: has_update,
-                remote_config,
+                remote_error: None, // 本地配置存在时，不返回远程错误（后台处理）
+                has_remote_update: false, // 初始为 false，后续通过事件通知
+                remote_config: None, // 初始为 None，后续通过事件通知
                 local_version,
-                remote_version,
+                remote_version: None, // 初始为 None，后续通过事件通知
             })
         }
         Err(local_err) => {
@@ -904,7 +941,7 @@ fn main() {
             use std::ffi::OsStr;
             use std::os::windows::ffi::OsStrExt;
             
-            let title: Vec<u16> = OsStr::new("易点云打印机安装小精灵 - 启动错误")
+            let title: Vec<u16> = OsStr::new("ePrinty - 启动错误")
                 .encode_wide()
                 .chain(Some(0))
                 .collect();

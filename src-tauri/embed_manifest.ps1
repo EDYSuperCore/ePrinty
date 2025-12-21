@@ -110,8 +110,8 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     
     if ([string]::IsNullOrEmpty($ExePath)) {
         Write-Host "未找到 exe 文件，请手动指定路径。例如：" -ForegroundColor Red
-        Write-Host "  .\embed_manifest.ps1 -ExePath `"target\release\易点云打印机安装小精灵.exe`"" -ForegroundColor Yellow
-        Write-Host "  .\embed_manifest.ps1 -ExePath `"target\debug\易点云打印机安装小精灵.exe`"" -ForegroundColor Yellow
+        Write-Host "  .\embed_manifest.ps1 -ExePath `"target\release\ePrinty.exe`"" -ForegroundColor Yellow
+        Write-Host "  .\embed_manifest.ps1 -ExePath `"target\debug\ePrinty.exe`"" -ForegroundColor Yellow
         exit 1
     }
 }
