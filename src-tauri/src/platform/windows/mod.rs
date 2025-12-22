@@ -1,7 +1,9 @@
 pub mod cmd;
 pub mod encoding;
+pub mod enum_printers;
 pub mod install;
 pub mod list;
+pub mod log;
 pub mod open;
 pub mod powershell_install;
 pub mod ps;

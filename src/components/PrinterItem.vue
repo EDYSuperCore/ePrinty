@@ -29,10 +29,32 @@
       </div>
     </div>
 
-    <!-- 安装按钮 -->
+    <!-- 安装按钮 - 基于 detectState 显示 -->
     <div class="flex-shrink-0 ml-4">
+      <!-- detecting: 检测中 -->
+      <div v-if="detectState === 'detecting'" class="px-4 py-1.5 text-xs font-medium text-gray-500 flex items-center space-x-1.5">
+        <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>检测中...</span>
+      </div>
+      
+      <!-- unknown: 状态未知，显示重试按钮 -->
       <button
-        v-if="!isInstalled"
+        v-else-if="detectState === 'unknown'"
+        @click="handleRetryDetect"
+        class="px-4 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors flex items-center space-x-1.5"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>重试检测</span>
+      </button>
+      
+      <!-- not_installed: 未安装，显示安装按钮 -->
+      <button
+        v-else-if="detectState === 'not_installed'"
         @click="handleInstall"
         :disabled="installing"
         class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors flex items-center space-x-1.5"
@@ -43,9 +65,30 @@
         </svg>
         <span>{{ installing ? '安装中...' : '安装' }}</span>
       </button>
-      <div v-else class="px-3 py-1.5 text-xs font-medium text-gray-600">
+      
+      <!-- installed: 已安装，显示已就绪 -->
+      <div v-else-if="detectState === 'installed' || isInstalled" class="px-3 py-1.5 text-xs font-medium text-gray-600">
         已就绪
       </div>
+      
+      <!-- 降级：如果没有 detectState，使用旧的 isInstalled 逻辑 -->
+      <template v-else>
+        <button
+          v-if="!isInstalled"
+          @click="handleInstall"
+          :disabled="installing"
+          class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors flex items-center space-x-1.5"
+        >
+          <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>{{ installing ? '安装中...' : '安装' }}</span>
+        </button>
+        <div v-else class="px-3 py-1.5 text-xs font-medium text-gray-600">
+          已就绪
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -62,16 +105,38 @@ export default {
       type: Boolean,
       default: false
     },
+    detectState: {
+      type: String,
+      default: 'unknown', // 'detecting' | 'installed' | 'not_installed' | 'unknown'
+      validator: (value) => ['detecting', 'installed', 'not_installed', 'unknown'].includes(value)
+    },
     installing: {
       type: Boolean,
       default: false
     }
   },
+  watch: {
+    installing(newVal, oldVal) {
+      // [UI][InstallButton] 插桩日志 - 监听 installing 状态变化
+      console.log(`[UI][InstallButton] id=${this.printer.name} state=${this.isInstalled ? 'installed' : 'idle'} installing=${newVal} (changed from ${oldVal})`)
+    },
+    isInstalled(newVal, oldVal) {
+      // [UI][InstallButton] 插桩日志 - 监听 isInstalled 状态变化
+      console.log(`[UI][InstallButton] id=${this.printer.name} state=${newVal ? 'installed' : 'idle'} installing=${this.installing} (changed from ${oldVal ? 'installed' : 'idle'})`)
+    }
+  },
   methods: {
     handleInstall() {
+      // [UI][InstallClick] 插桩日志
+      console.log(`[UI][InstallClick] id=${this.printer.name} before=installing=${this.installing} state=${this.isInstalled ? 'installed' : 'idle'} detectState=${this.detectState}`)
       console.log('PrinterItem: 点击安装按钮', this.printer)
       // 直接触发 install 事件，安装状态由父组件 App.vue 统一管理
       this.$emit('install', this.printer)
+    },
+    handleRetryDetect() {
+      console.log(`[UI][RetryDetect] id=${this.printer.name}`)
+      // 触发重试检测事件
+      this.$emit('retry-detect')
     }
   }
 }

@@ -181,8 +181,10 @@
                 :key="printer.name"
                 :printer="printer"
                 :is-installed="isInstalled(printer.name)"
+                :detect-state="getPrinterDetectState(printer.name)"
                 :installing="installingPrinters.has(printer.name)"
                 @install="handleInstall"
+                @retry-detect="retryDetect"
               />
             </div>
           </div>
@@ -923,13 +925,19 @@ export default {
       loading: false,
       error: null,
       config: null,
-      installedPrinters: [],
+      installedPrinters: [], // 保留用于兼容，但不再在 loadData 中等待
       selectedAreaIndex: null, // 当前选中的办公区索引
+      // 打印机检测状态管理
+      printerDetect: {
+        status: 'idle', // 'idle' | 'running' | 'timeout' | 'error'
+        error: null
+      },
+      printerRuntime: {}, // key: printer.name, value: { detectState: 'detecting' | 'installed' | 'not_installed' | 'unknown' }
       statusMessage: '',
       statusType: 'info', // 'info', 'success', 'error'
       dingtalkIcon: '/dingtalk_icon.png', // 钉钉图标路径（从 public 目录）
       showHelp: false, // 显示帮助对话框
-      version: '1.4.0', // 软件版本号
+      version: '1.4.1', // 软件版本号
       showUpdateDialog: false, // 显示更新对话框
       pendingRemoteConfig: null, // 待更新的远程配置
       localVersion: '', // 本地版本号
@@ -1020,13 +1028,186 @@ export default {
     selectArea(index) {
       this.selectedAreaIndex = index
     },
-    // 检查打印机是否已安装
+    // 检查打印机是否已安装（兼容旧逻辑，但优先使用 detectState）
     isInstalled(printerName) {
+      // 优先使用新的 detectState
+      if (this.printerRuntime[printerName]) {
+        return this.printerRuntime[printerName].detectState === 'installed'
+      }
+      // 降级到旧逻辑（兼容）
       return this.installedPrinters.some(name => 
         name === printerName || 
         name.includes(printerName) ||
         printerName.includes(name)
       )
+    },
+    // 获取打印机的检测状态
+    getPrinterDetectState(printerName) {
+      if (this.printerRuntime[printerName]) {
+        return this.printerRuntime[printerName].detectState
+      }
+      return 'unknown'
+    },
+    // 初始化打印机运行时状态
+    initializePrinterRuntime() {
+      this.printerRuntime = {}
+      if (this.config && this.config.areas) {
+        this.config.areas.forEach(area => {
+          if (area.printers) {
+            area.printers.forEach(printer => {
+              // Vue 3 中直接赋值即可，不需要 $set
+              this.printerRuntime[printer.name] = {
+                detectState: 'detecting'
+              }
+            })
+          }
+        })
+      }
+    },
+    // 异步启动检测已安装打印机（带自动重试机制）
+    async startDetectInstalledPrinters() {
+      // 生成检测任务唯一 ID
+      const detectId = `detect_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const detectStartTime = performance.now()
+      
+      // 检查是否已有检测任务在运行
+      const isAlreadyRunning = this.printerDetect.status === 'running'
+      
+      console.log(`[PrinterDetect][Frontend] DETECT_START detect_id=${detectId} timestamp=${detectStartTime.toFixed(2)} status=${this.printerDetect.status} is_running=${isAlreadyRunning} printers_count=${Object.keys(this.printerRuntime).length}`)
+      
+      // 如果已经在运行，不重复启动
+      if (isAlreadyRunning) {
+        console.log(`[PrinterDetect][Frontend] DETECT_SKIP detect_id=${detectId} reason=already_running`)
+        return
+      }
+      
+      this.printerDetect.status = 'running'
+      this.printerDetect.error = null
+      
+      let attemptCount = 0
+      const maxAttempts = 2
+      
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        attemptCount = attempt
+        const attemptStartTime = performance.now()
+        const timeoutMs = attempt === 1 ? 8000 : 18000 // 第一次 8s，第二次 18s
+        
+        console.log(`[PrinterDetect][Frontend] ATTEMPT_START detect_id=${detectId} attempt=${attempt} timeout_ms=${timeoutMs} status=${this.printerDetect.status}`)
+        
+        try {
+          // 调用后端接口（带超时机制）
+          console.log(`[PrinterDetect][Frontend] INVOKE_START detect_id=${detectId} attempt=${attempt}`)
+          const detectPromise = invoke('list_printers')
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => {
+              console.log(`[PrinterDetect][Frontend] TIMEOUT_TRIGGERED detect_id=${detectId} attempt=${attempt} timeout_ms=${timeoutMs}`)
+              resolve(null) // 超时返回 null
+            }, timeoutMs)
+          })
+          
+          const result = await Promise.race([detectPromise, timeoutPromise])
+          const attemptElapsed = performance.now() - attemptStartTime
+          
+          if (result === null) {
+            // 超时情况
+            console.log(`[PrinterDetect][Frontend] ATTEMPT_TIMEOUT detect_id=${detectId} attempt=${attempt} elapsed_ms=${attemptElapsed.toFixed(2)}`)
+            
+            // 如果不是最后一次尝试，继续重试（保持 detecting 状态）
+            if (attempt < maxAttempts) {
+              console.log(`[PrinterDetect][Frontend] AUTO_RETRY detect_id=${detectId} attempt=${attempt} next_attempt=${attempt + 1}`)
+              continue // 继续下一次尝试
+            } else {
+              // 最后一次尝试也超时，标记为失败
+              this.printerDetect.status = 'timeout'
+              const totalElapsed = performance.now() - detectStartTime
+              console.log(`[PrinterDetect][Frontend] DETECT_FINAL_TIMEOUT detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} final_state=unknown`)
+              
+              // 将所有 detecting 状态置为 unknown
+              Object.keys(this.printerRuntime).forEach(printerName => {
+                if (this.printerRuntime[printerName].detectState === 'detecting') {
+                  this.printerRuntime[printerName].detectState = 'unknown'
+                }
+              })
+              return
+            }
+          } else if (Array.isArray(result)) {
+            // 成功返回：更新每个打印机的检测状态
+            console.log(`[PrinterDetect][Frontend] INVOKE_RESOLVE detect_id=${detectId} attempt=${attempt} result_length=${result.length} elapsed_ms=${attemptElapsed.toFixed(2)}`)
+            
+            this.printerDetect.status = 'idle'
+            const installedNames = result
+            const totalElapsed = performance.now() - detectStartTime
+            
+            // 更新 installedPrinters（用于兼容）
+            this.installedPrinters = installedNames
+            
+            // 更新每个打印机的 detectState
+            let installedCount = 0
+            let notInstalledCount = 0
+            Object.keys(this.printerRuntime).forEach(printerName => {
+              const isInstalled = installedNames.some(name => 
+                name === printerName || 
+                name.includes(printerName) ||
+                printerName.includes(name)
+              )
+              this.printerRuntime[printerName].detectState = isInstalled ? 'installed' : 'not_installed'
+              if (isInstalled) {
+                installedCount++
+              } else {
+                notInstalledCount++
+              }
+            })
+            
+            console.log(`[PrinterDetect][Frontend] DETECT_SUCCESS detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} installed=${installedCount} not_installed=${notInstalledCount} final_state=installed/not_installed`)
+            return // 成功，退出循环
+          } else {
+            // 异常情况
+            throw new Error('返回结果格式异常')
+          }
+        } catch (err) {
+          const attemptElapsed = performance.now() - attemptStartTime
+          console.log(`[PrinterDetect][Frontend] INVOKE_REJECT detect_id=${detectId} attempt=${attempt} elapsed_ms=${attemptElapsed.toFixed(2)} error=${err}`)
+          console.error(`[PrinterDetect][Frontend] EXCEPTION detect_id=${detectId} attempt=${attempt}`, err)
+          if (err && err.stack) {
+            console.error(`[PrinterDetect][Frontend] EXCEPTION_STACK detect_id=${detectId}`, err.stack)
+          }
+          
+          // 如果不是最后一次尝试，继续重试（保持 detecting 状态）
+          if (attempt < maxAttempts) {
+            console.log(`[PrinterDetect][Frontend] AUTO_RETRY detect_id=${detectId} attempt=${attempt} next_attempt=${attempt + 1} reason=exception`)
+            continue // 继续下一次尝试
+          } else {
+            // 最后一次尝试也失败，标记为错误
+            console.error('检测已安装打印机失败:', err)
+            this.printerDetect.status = 'error'
+            this.printerDetect.error = err.toString() || err.message || '未知错误'
+            const totalElapsed = performance.now() - detectStartTime
+            
+            console.log(`[PrinterDetect][Frontend] DETECT_FINAL_ERROR detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} final_state=unknown error=${err}`)
+            
+            // 将所有 detecting 状态置为 unknown
+            Object.keys(this.printerRuntime).forEach(printerName => {
+              if (this.printerRuntime[printerName].detectState === 'detecting') {
+                this.printerRuntime[printerName].detectState = 'unknown'
+              }
+            })
+            return
+          }
+        }
+      }
+    },
+    // 重试检测
+    async retryDetect() {
+      // 重置所有 unknown 状态为 detecting
+      Object.keys(this.printerRuntime).forEach(printerName => {
+        if (this.printerRuntime[printerName].detectState === 'unknown') {
+          // Vue 3 中直接赋值即可，不需要 $set
+          this.printerRuntime[printerName].detectState = 'detecting'
+        }
+      })
+      
+      // 重新启动检测
+      await this.startDetectInstalledPrinters()
     },
     async loadData() {
       this.loading = true
@@ -1035,26 +1216,11 @@ export default {
       this.statusType = 'info'
 
       try {
-        // 并行加载配置和已安装打印机列表
-        const [configResult, printers] = await Promise.all([
-          invoke('load_config').catch(err => {
-            console.error('加载配置失败:', err)
-            throw err
-          }),
-          // 为 list_printers 增加 4s 超时，防止 Ricoh 打印机导致的卡死
-          Promise.race([
-            invoke('list_printers'),
-            new Promise((resolve) => {
-              setTimeout(() => {
-                console.warn('获取打印机列表超时（4秒），返回空列表')
-                resolve([]) // 超时返回空数组
-              }, 4000)
-            })
-          ]).catch(err => {
-            console.warn('获取打印机列表失败:', err)
-            return [] // 失败时返回空数组
-          })
-        ])
+        // 只加载配置，不等待打印机列表检测
+        const configResult = await invoke('load_config').catch(err => {
+          console.error('加载配置失败:', err)
+          throw err
+        })
 
         
         // 检查配置结果是否有效
@@ -1102,12 +1268,16 @@ export default {
           }
         }
 
-        this.installedPrinters = printers || []
+        // 初始化打印机运行时状态（所有打印机初始为 detecting）
+        this.initializePrinterRuntime()
         
         // 如果有办公区且未选择，自动选择第一个
         if (this.config && this.config.areas && this.config.areas.length > 0 && this.selectedAreaIndex === null) {
           this.selectedAreaIndex = 0
         }
+        
+        // 异步启动打印机检测（不阻塞页面渲染）
+        this.startDetectInstalledPrinters()
       } catch (err) {
         console.error('加载数据时发生错误:', err)
         this.error = err.toString() || err.message || '未知错误'
@@ -1123,6 +1293,9 @@ export default {
             async handleInstall(printer) {
               // 开始安装：添加到 installingPrinters Set
               this.installingPrinters.add(printer.name)
+              
+              // [UI][InstallClick] 插桩日志 - 记录点击时的状态
+              console.log(`[UI][InstallClick] id=${printer.name} before=installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)}`)
               
               console.info('========================================')
               console.info(`🚀 开始安装打印机: ${printer.name}`)
@@ -1284,6 +1457,10 @@ export default {
                 if (result.success) {
                   console.info(`[步骤 ${stepIndex + 1}] ✓ 验证通过`)
                   console.info('✅ 打印机安装成功!')
+                  
+                  // [UI][InstallSuccessSignal] 插桩日志 - 成功信号来源：invoke返回值
+                  console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="${result.message || '安装成功'}" source=invoke installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
+                  
                   // 更新步骤为完成
                   if (stepIndex < this.installProgress.steps.length && this.installProgress.steps[stepIndex]) {
                     this.installProgress.steps[stepIndex].message = '验证通过'
@@ -1307,17 +1484,17 @@ export default {
                   this.statusMessage = `${result.message || '安装成功'} [方式: ${method}]`
                   this.statusType = 'success'
                   
-                  // 重新获取已安装的打印机列表
-                  try {
-                    this.installedPrinters = await invoke('list_printers')
-                  } catch (e) {
-                    console.error('获取打印机列表失败:', e)
-                  }
+                  // 重新检测已安装的打印机列表（异步，不阻塞）
+                  this.startDetectInstalledPrinters()
                 } else {
                   // 安装失败
                   console.error(`[步骤 ${stepIndex + 1}] ✗ 验证失败`)
                   console.error('❌ 打印机安装失败!')
                   console.error(`错误消息: ${result.message}`)
+                  
+                  // [UI][InstallSuccessSignal] 插桩日志 - 失败信号来源：invoke返回值
+                  console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="${result.message || '安装失败'}" source=invoke installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
+                  
                   if (stepIndex < this.installProgress.steps.length && this.installProgress.steps[stepIndex]) {
                     this.installProgress.steps[stepIndex].message = '验证失败'
                   }
@@ -1352,6 +1529,10 @@ export default {
                 if (err && err.stack) {
                   console.error('调用栈:', err.stack)
                 }
+                
+                // [UI][InstallSuccessSignal] 插桩日志 - 异常情况
+                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="异常: ${err}" source=exception installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
+                
                 this.installProgress.success = false
                 const errorMessage = err && err.toString ? err.toString() : (typeof err === 'string' ? err : '安装失败')
                 this.installProgress.message = errorMessage
@@ -1361,8 +1542,14 @@ export default {
                 console.error('========================================')
               }
               finally {
-    // 关键：无论成功/失败/异常，都要释放按钮状态
-                if (typeof done === 'function') done()
+                // [UI][InstallSuccessSignal] 插桩日志 - finally 块执行
+                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="进入finally块" source=finally installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
+                
+                // 关键：无论成功/失败/异常，都要释放按钮状态
+                this.installingPrinters.delete(printer.name)
+                
+                // [UI][InstallSuccessSignal] 插桩日志 - 清理后状态
+                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="已清理installing状态" source=finally installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
 
                 setTimeout(() => {
                   this.showInstallProgress = false
@@ -1529,20 +1716,18 @@ export default {
           // 重置状态
           this.pendingRemoteConfig = null
           
-          // 重新加载已安装打印机列表
-          try {
-            this.installedPrinters = await invoke('list_printers')
-            // 如果有选中的办公区，保持选中状态
-            if (this.selectedAreaIndex !== null && this.config && this.config.areas) {
-              // 确保选中的索引仍然有效
-              if (this.selectedAreaIndex >= this.config.areas.length) {
-                this.selectedAreaIndex = 0
-              }
+          // 重新初始化打印机运行时状态并异步检测
+          this.initializePrinterRuntime()
+          this.startDetectInstalledPrinters()
+          
+          // 如果有选中的办公区，保持选中状态
+          if (this.selectedAreaIndex !== null && this.config && this.config.areas) {
+            // 确保选中的索引仍然有效
+            if (this.selectedAreaIndex >= this.config.areas.length) {
+              this.selectedAreaIndex = 0
             }
-            this.statusMessage = '配置更新成功'
-          } catch (e) {
-            console.error('获取打印机列表失败:', e)
           }
+          this.statusMessage = '配置更新成功'
         }
       } catch (err) {
         console.error('更新配置失败:', err)

@@ -1,6 +1,6 @@
 [package]
 name = "easy-printer"
-version = "1.4.0"
+version = "1.4.1"
 description = "ePrinty - 让打印这件事，简单一点"
 authors = ["you"]
 license = ""
@@ -21,16 +21,11 @@ chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi"] }
-
-# Windows 特定的依赖
-# 注意：由于我们使用 PowerShell 命令而不是直接调用 Windows API，
-# 实际上不需要这些 Windows features
-# 如果以后需要直接使用 Windows API，可以使用以下配置：
-# [target.'cfg(windows)'.dependencies]
-# windows = { version = "0.52", features = [
-#     "Win32_Foundation",
-#     "Win32_System_SystemServices"
-# ] }
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_Graphics_Printing",
+] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
