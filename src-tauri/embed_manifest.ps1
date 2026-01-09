@@ -126,6 +126,33 @@ if (-not (Test-Path $ExePath)) {
     exit 1
 }
 
+# 检查文件是否被占用（尝试以写入模式打开）
+try {
+    $fileStream = [System.IO.File]::Open($ExePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    $fileStream.Close()
+    $fileStream.Dispose()
+} catch {
+    Write-Error "无法访问 exe 文件，文件可能被占用: $ExePath"
+    Write-Error "请确保："
+    Write-Error "  1. ePrinty.exe 没有正在运行"
+    Write-Error "  2. 没有其他程序正在使用该文件"
+    Write-Error "  3. 以管理员权限运行 PowerShell"
+    exit 1
+}
+
+# 检查是否有管理员权限
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warning "当前未以管理员权限运行 PowerShell"
+    Write-Warning "嵌入 manifest 可能需要管理员权限"
+    Write-Warning "建议：右键点击 PowerShell，选择'以管理员身份运行'"
+    $continue = Read-Host "是否继续尝试？(Y/N)"
+    if ($continue -ne "Y" -and $continue -ne "y") {
+        Write-Host "已取消" -ForegroundColor Yellow
+        exit 0
+    }
+}
+
 # Manifest 路径也基于当前目录
 $ManifestPath = "app.manifest"
 # 如果当前目录没有，尝试脚本目录
@@ -168,17 +195,32 @@ if ($null -eq $MtPath) {
 }
 
 # 使用 mt.exe 嵌入 manifest
+Write-Host "正在嵌入 manifest..." -ForegroundColor Cyan
 try {
-    $result = & $MtPath -manifest $ManifestPath -outputresource:"$ExePath;1" 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    # 使用 -nologo 参数减少输出，并捕获所有输出
+    $result = & $MtPath -nologo -manifest $ManifestPath -outputresource:"$ExePath;1" 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if ($exitCode -eq 0) {
         Write-Host "✓ 成功嵌入 manifest！" -ForegroundColor Green
-        Write-Host "现在应用将以管理员权限运行"
+        Write-Host "现在应用将以管理员权限运行" -ForegroundColor Green
     } else {
-        Write-Error "嵌入 manifest 失败: $result"
+        Write-Error "嵌入 manifest 失败 (退出代码: $exitCode)"
+        Write-Error "错误信息: $result"
+        Write-Host ""
+        Write-Host "可能的解决方案：" -ForegroundColor Yellow
+        Write-Host "  1. 确保 ePrinty.exe 没有正在运行" -ForegroundColor Yellow
+        Write-Host "  2. 关闭所有可能占用该文件的程序（如杀毒软件、文件管理器）" -ForegroundColor Yellow
+        Write-Host "  3. 以管理员权限运行 PowerShell，然后重新执行此脚本" -ForegroundColor Yellow
+        Write-Host "  4. 如果路径包含中文字符，尝试将项目移动到纯英文路径" -ForegroundColor Yellow
         exit 1
     }
 } catch {
     Write-Error "执行 mt.exe 时出错: $_"
+    Write-Host ""
+    Write-Host "可能的解决方案：" -ForegroundColor Yellow
+    Write-Host "  1. 确保 ePrinty.exe 没有正在运行" -ForegroundColor Yellow
+    Write-Host "  2. 以管理员权限运行 PowerShell" -ForegroundColor Yellow
     exit 1
 }
 

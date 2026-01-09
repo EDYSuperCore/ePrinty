@@ -183,22 +183,105 @@ fn enum_printers_level_4(flags: u32) -> Result<Vec<PrinterInfo>, String> {
 /// 
 /// # 实现说明
 /// - 使用 PRINTER_INFO_4W（Level 4），包含打印机名称
-/// - flags 使用 PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS | PRINTER_ENUM_NETWORK
+/// - flags 使用 PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS（必要时再加 PRINTER_ENUM_SHARED）
 /// - 两阶段调用：先获取所需 buffer size，再分配 buffer 获取数据
+/// - 如果 EnumPrintersW 成功但 count=0，会 fallback 到 PowerShell Get-Printer
 /// - 注意：windows-rs 0.52 中 PRINTER_INFO_2W 可能不可用，因此使用 PRINTER_INFO_4W
 pub fn enum_printers_w() -> Result<Vec<PrinterInfo>, String> {
-    // 设置 flags：包含本地、连接和网络打印机
-    let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS | PRINTER_ENUM_NETWORK;
+    // 设置 flags：包含本地和连接打印机（修复：移除 PRINTER_ENUM_NETWORK，避免返回 0）
+    let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
     
     // 使用 Level 4（PRINTER_INFO_4W）枚举打印机
     match enum_printers_level_4(flags) {
         Ok(printers) => {
             super::log::write_log(&format!("[EnumPrinters] Successfully enumerated {} printers using Level 4", printers.len()));
+            
+            // 如果 EnumPrintersW 成功但 count=0，fallback 到 PowerShell Get-Printer
+            if printers.is_empty() {
+                super::log::write_log(&format!("[EnumPrinters] EnumPrintersW returned 0 printers, falling back to PowerShell Get-Printer"));
+                eprintln!("[EnumPrinters] EnumPrintersW returned 0 printers, falling back to PowerShell Get-Printer");
+                
+                return enum_printers_fallback_powershell();
+            }
+            
             Ok(printers)
         }
         Err(e) => {
             super::log::write_log(&format!("[EnumPrinters] Level 4 failed: {}", e));
-            Err(format!("EnumPrintersW 失败: {}", e))
+            // 如果 EnumPrintersW 失败，也尝试 fallback
+            eprintln!("[EnumPrinters] EnumPrintersW failed: {}, falling back to PowerShell Get-Printer", e);
+            enum_printers_fallback_powershell()
+        }
+    }
+}
+
+/// Fallback：使用 PowerShell Get-Printer 枚举打印机
+fn enum_printers_fallback_powershell() -> Result<Vec<PrinterInfo>, String> {
+    use crate::platform::windows::encoding::decode_windows_string;
+    
+    // 使用简单的 PowerShell 命令，直接获取 Name 列表（避免 JSON 解析复杂性）
+    let fallback_script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Printer | Select-Object -ExpandProperty Name";
+    
+    match super::ps::run_powershell(fallback_script) {
+        Ok(output) => {
+            let stdout = decode_windows_string(&output.stdout);
+            let stderr = decode_windows_string(&output.stderr);
+            let exit_code = output.status.code();
+            
+            super::log::write_log(&format!(
+                "[EnumPrinters] PowerShell fallback: exit_code={:?} stdout_len={} stderr_len={}",
+                exit_code, stdout.len(), stderr.len()
+            ));
+            
+            if exit_code != Some(0) {
+                let error_msg = format!("PowerShell Get-Printer fallback failed: exit_code={:?}, stderr={}", exit_code, stderr);
+                super::log::write_log(&format!("[EnumPrinters] {}", error_msg));
+                eprintln!("[EnumPrinters] {}", error_msg);
+                return Err(error_msg);
+            }
+            
+            // 解析输出：每行一个打印机名称
+            if stdout.trim().is_empty() {
+                super::log::write_log(&format!("[EnumPrinters] PowerShell Get-Printer returned empty output"));
+                eprintln!("[EnumPrinters] PowerShell Get-Printer returned empty output");
+                return Ok(Vec::new());
+            }
+            
+            // 按行分割，提取打印机名称
+            let printers: Vec<PrinterInfo> = stdout
+                .lines()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .map(|name| PrinterInfo {
+                    name: name.to_string(),
+                    port_name: None,
+                    driver_name: None,
+                })
+                .collect();
+            
+            super::log::write_log(&format!(
+                "[EnumPrinters] PowerShell fallback successfully enumerated {} printers",
+                printers.len()
+            ));
+            eprintln!("[EnumPrinters] PowerShell fallback successfully enumerated {} printers", printers.len());
+            
+            // 记录前 5 条打印机信息用于调试
+            let print_count = std::cmp::min(5, printers.len());
+            for i in 0..print_count {
+                let info = &printers[i];
+                super::log::write_log(&format!(
+                    "[EnumPrinters] Fallback Printer[{}]: name={}",
+                    i, info.name
+                ));
+            }
+            
+            Ok(printers)
+        }
+        Err(e) => {
+            let error_msg = format!("PowerShell Get-Printer fallback execution failed: {}", e);
+            super::log::write_log(&format!("[EnumPrinters] {}", error_msg));
+            eprintln!("[EnumPrinters] {}", error_msg);
+            Err(error_msg)
         }
     }
 }

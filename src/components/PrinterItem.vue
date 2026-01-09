@@ -52,41 +52,237 @@
         <span>重试检测</span>
       </button>
       
-      <!-- not_installed: 未安装，显示安装按钮 -->
-      <button
-        v-else-if="detectState === 'not_installed'"
-        @click="handleInstall"
-        :disabled="installing"
-        class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors flex items-center space-x-1.5"
-      >
-        <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span>{{ installing ? '安装中...' : '安装' }}</span>
-      </button>
+      <!-- not_installed: 未安装，显示安装按钮组 -->
+      <div v-else-if="detectState === 'not_installed'" class="install-actions">
+        <div class="flex items-stretch gap-0">
+          <!-- 主安装按钮 -->
+          <button
+            @click="handleInstall"
+            :disabled="installing"
+            class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-l-md transition-colors flex items-center space-x-1.5"
+          >
+            <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{{ installing ? '安装中...' : '安装' }}</span>
+          </button>
+          <!-- 下拉箭头按钮 -->
+          <div class="relative flex" v-click-outside="closeInstallModeMenu">
+            <button
+              ref="installModeButton"
+              @click.stop="toggleInstallModeMenu"
+              :disabled="installing"
+              class="install-caret px-2 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-r-md border-l border-gray-700 transition-colors flex items-center justify-center"
+              :title="`当前安装方式：${getInstallModeLabel(installMode)}`"
+            >
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <!-- 安装方式下拉菜单 -->
+            <Teleport to="body">
+              <div
+                v-if="showInstallModeMenu"
+                :style="installModeMenuStyle"
+                class="fixed w-56 bg-white rounded-md shadow-lg border border-gray-200 z-[9999]"
+              >
+                <div class="py-1">
+                  <button
+                    v-for="option in installModeOptions"
+                    :key="option.value"
+                    @click.stop="selectInstallMode(option.value)"
+                    :class="[
+                      'w-full px-4 py-2 text-left text-sm transition-colors flex items-center justify-between',
+                      installMode === option.value
+                        ? 'bg-gray-100 text-gray-900 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    ]"
+                  >
+                    <span>{{ option.label }}</span>
+                    <svg v-if="installMode === option.value" class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </Teleport>
+          </div>
+        </div>
+        <!-- 安装方式提示文字 -->
+        <div class="install-mode-hint">
+          安装方式：{{ getInstallModeLabel(installMode) }}
+        </div>
+      </div>
       
-      <!-- installed: 已安装，显示已就绪 -->
-      <div v-else-if="detectState === 'installed' || isInstalled" class="px-3 py-1.5 text-xs font-medium text-gray-600">
-        已就绪
+      <!-- installed: 已安装，显示已就绪 + 三个点菜单 -->
+      <div v-else-if="detectState === 'installed' || isInstalled" class="flex items-center space-x-2">
+        <span class="px-3 py-1.5 text-xs font-medium text-gray-600">已就绪</span>
+        <!-- 三个点菜单 -->
+        <div class="relative" v-click-outside="closeMenu">
+          <button
+            ref="menuButton"
+            @click.stop="toggleMenu"
+            :disabled="reinstalling || installing"
+            class="p-1.5 text-gray-400 hover:text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed rounded transition-colors"
+            title="更多操作"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+            </svg>
+          </button>
+          <!-- 下拉菜单 - 使用 fixed 定位避免被父容器遮挡 -->
+          <Teleport to="body">
+            <div
+              v-if="showMenu"
+              :style="menuStyle"
+              class="fixed w-48 bg-white rounded-md shadow-lg border border-gray-200 z-[9999]"
+            >
+            <div class="py-1">
+              <button
+                @click.stop="handlePrintTestPage"
+                :disabled="reinstalling || installing"
+                class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                <span>打印测试页</span>
+              </button>
+              <button
+                @click.stop="handleReinstall"
+                :disabled="reinstalling || installing"
+                class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+              >
+                <svg v-if="reinstalling" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>{{ reinstalling ? '处理中...' : '重新安装（不推荐）' }}</span>
+              </button>
+            </div>
+            <div class="border-t border-gray-200 px-4 py-2">
+              <p class="text-xs text-gray-500">高级操作，可能影响系统打印设置。若不清楚含义请勿使用。</p>
+            </div>
+          </div>
+          </Teleport>
+        </div>
       </div>
       
       <!-- 降级：如果没有 detectState，使用旧的 isInstalled 逻辑 -->
       <template v-else>
-        <button
-          v-if="!isInstalled"
-          @click="handleInstall"
-          :disabled="installing"
-          class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors flex items-center space-x-1.5"
-        >
-          <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <span>{{ installing ? '安装中...' : '安装' }}</span>
-        </button>
-        <div v-else class="px-3 py-1.5 text-xs font-medium text-gray-600">
-          已就绪
+        <div v-if="!isInstalled" class="install-actions">
+          <div class="flex items-stretch gap-0">
+            <!-- 主安装按钮 -->
+            <button
+              @click="handleInstall"
+              :disabled="installing"
+              class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-l-md transition-colors flex items-center space-x-1.5"
+            >
+              <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>{{ installing ? '安装中...' : '安装' }}</span>
+            </button>
+            <!-- 下拉箭头按钮 -->
+            <div class="relative flex" v-click-outside="closeInstallModeMenu">
+              <button
+                ref="installModeButtonFallback"
+                @click.stop="toggleInstallModeMenu"
+                :disabled="installing"
+                class="install-caret px-2 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-r-md border-l border-gray-700 transition-colors flex items-center justify-center"
+                :title="`当前安装方式：${getInstallModeLabel(installMode)}`"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <!-- 安装方式下拉菜单 -->
+              <Teleport to="body">
+                <div
+                  v-if="showInstallModeMenu"
+                  :style="installModeMenuStyle"
+                  class="fixed w-56 bg-white rounded-md shadow-lg border border-gray-200 z-[9999]"
+                >
+                  <div class="py-1">
+                    <button
+                      v-for="option in installModeOptions"
+                      :key="option.value"
+                      @click.stop="selectInstallMode(option.value)"
+                      :class="[
+                        'w-full px-4 py-2 text-left text-sm transition-colors flex items-center justify-between',
+                        installMode === option.value
+                          ? 'bg-gray-100 text-gray-900 font-medium'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      ]"
+                    >
+                      <span>{{ option.label }}</span>
+                      <svg v-if="installMode === option.value" class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </Teleport>
+            </div>
+          </div>
+          <!-- 安装方式提示文字 -->
+          <div class="install-mode-hint">
+            安装方式：{{ getInstallModeLabel(installMode) }}
+          </div>
+        </div>
+        <div v-else class="flex items-center space-x-2">
+          <span class="px-3 py-1.5 text-xs font-medium text-gray-600">已就绪</span>
+          <!-- 三个点菜单 -->
+          <div class="relative" v-click-outside="closeMenu">
+            <button
+              ref="menuButtonFallback"
+              @click.stop="toggleMenu"
+              :disabled="reinstalling || installing"
+              class="p-1.5 text-gray-400 hover:text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed rounded transition-colors"
+              title="更多操作"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+            </button>
+            <!-- 下拉菜单 - 使用 fixed 定位避免被父容器遮挡 -->
+            <Teleport to="body">
+              <div
+                v-if="showMenu"
+                :style="menuStyle"
+                class="fixed w-48 bg-white rounded-md shadow-lg border border-gray-200 z-[9999]"
+              >
+                <div class="py-1">
+                  <button
+                    @click.stop="handlePrintTestPage"
+                    :disabled="reinstalling || installing"
+                    class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    <span>打印测试页</span>
+                  </button>
+                  <button
+                    @click.stop="handleReinstall"
+                    :disabled="reinstalling || installing"
+                    class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                  >
+                    <svg v-if="reinstalling" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>{{ reinstalling ? '处理中...' : '重新安装（不推荐）' }}</span>
+                  </button>
+                </div>
+                <div class="border-t border-gray-200 px-4 py-2">
+                  <p class="text-xs text-gray-500">高级操作，可能影响系统打印设置。若不清楚含义请勿使用。</p>
+                </div>
+              </div>
+            </Teleport>
+          </div>
         </div>
       </template>
     </div>
@@ -113,6 +309,36 @@ export default {
     installing: {
       type: Boolean,
       default: false
+    },
+    reinstalling: {
+      type: Boolean,
+      default: false
+    },
+    installMode: {
+      type: String,
+      default: 'auto'
+    }
+  },
+  data() {
+    return {
+      showMenu: false,
+      menuStyle: {
+        top: '0px',
+        right: '0px'
+      },
+      showInstallModeMenu: false,
+      installModeMenuStyle: {
+        top: '0px',
+        right: '0px'
+      },
+      // 安装方式选项
+      installModeOptions: [
+        { value: 'auto', label: '自动兼容（推荐）' },
+        { value: 'package', label: '驱动包安装（推荐）' },
+        { value: 'installer', label: '厂商安装程序' },
+        { value: 'ipp', label: '免驱打印（系统通用）' },
+        { value: 'legacy_inf', label: '传统 INF 安装（老型号）' }
+      ]
     }
   },
   watch: {
@@ -128,17 +354,127 @@ export default {
   methods: {
     handleInstall() {
       // [UI][InstallClick] 插桩日志
-      console.log(`[UI][InstallClick] id=${this.printer.name} before=installing=${this.installing} state=${this.isInstalled ? 'installed' : 'idle'} detectState=${this.detectState}`)
-      console.log('PrinterItem: 点击安装按钮', this.printer)
+      console.log(`[UI][InstallClick] id=${this.printer.name} before=installing=${this.installing} state=${this.isInstalled ? 'installed' : 'idle'} detectState=${this.detectState} installMode=${this.installMode}`)
+      console.log('PrinterItem: 点击安装按钮', this.printer, '安装方式:', this.installMode)
       // 直接触发 install 事件，安装状态由父组件 App.vue 统一管理
       this.$emit('install', this.printer)
+    },
+    toggleInstallModeMenu() {
+      if (!this.showInstallModeMenu) {
+        // 打开菜单时计算位置
+        this.$nextTick(() => {
+          const button = this.$refs.installModeButton || this.$refs.installModeButtonFallback
+          if (button) {
+            const buttonRect = button.getBoundingClientRect()
+            this.installModeMenuStyle = {
+              top: `${buttonRect.bottom + 4}px`,
+              right: `${window.innerWidth - buttonRect.right}px`
+            }
+          }
+        })
+      }
+      this.showInstallModeMenu = !this.showInstallModeMenu
+    },
+    closeInstallModeMenu() {
+      this.showInstallModeMenu = false
+    },
+    selectInstallMode(mode) {
+      this.closeInstallModeMenu()
+      // 使用 nextTick 确保菜单关闭后再触发事件
+      this.$nextTick(() => {
+        this.$emit('set-install-mode', mode)
+      })
+    },
+    getInstallModeLabel(mode) {
+      const option = this.installModeOptions.find(opt => opt.value === mode)
+      return option ? option.label : '自动兼容（推荐）'
     },
     handleRetryDetect() {
       console.log(`[UI][RetryDetect] id=${this.printer.name}`)
       // 触发重试检测事件
       this.$emit('retry-detect')
+    },
+    toggleMenu() {
+      if (!this.showMenu) {
+        // 打开菜单时计算位置
+        this.$nextTick(() => {
+          // 尝试使用 menuButton（新逻辑）或 menuButtonFallback（降级逻辑）
+          const button = this.$refs.menuButton || this.$refs.menuButtonFallback
+          if (button) {
+            const buttonRect = button.getBoundingClientRect()
+            this.menuStyle = {
+              top: `${buttonRect.bottom + 4}px`,
+              right: `${window.innerWidth - buttonRect.right}px`
+            }
+          }
+        })
+      }
+      this.showMenu = !this.showMenu
+    },
+    closeMenu() {
+      this.showMenu = false
+    },
+    handleReinstall() {
+      this.closeMenu()
+      // 使用 nextTick 确保菜单关闭后再触发事件
+      this.$nextTick(() => {
+        this.$emit('reinstall', this.printer)
+      })
+    },
+    handlePrintTestPage() {
+      this.closeMenu()
+      // 使用 nextTick 确保菜单关闭后再触发事件
+      this.$nextTick(() => {
+        this.$emit('print-test-page', this.printer)
+      })
+    },
+    handleRemove() {
+      this.closeMenu()
+      // 使用 nextTick 确保菜单关闭后再触发事件
+      this.$nextTick(() => {
+        this.$emit('remove', this.printer)
+      })
+    }
+  },
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = (event) => {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value()
+          }
+        }
+        document.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.removeEventListener('click', el.clickOutsideEvent)
+      }
     }
   }
 }
 </script>
 
+<style scoped>
+.install-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.install-mode-hint {
+  font-size: 12px;
+  color: #6b7280; /* text-gray-500 */
+  text-align: right;
+  margin-top: 2px;
+}
+
+.install-caret {
+  min-width: 36px;
+  padding-left: 8px;
+  padding-right: 8px;
+  /* 确保与主按钮高度一致 */
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+</style>

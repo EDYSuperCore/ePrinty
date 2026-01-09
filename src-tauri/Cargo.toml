@@ -20,11 +20,12 @@ encoding_rs = "0.8"
 chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi"] }
+winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi", "winspool", "winnt", "errhandlingapi"] }
 windows = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_SystemServices",
     "Win32_Graphics_Printing",
+    
 ] }
 
 [features]

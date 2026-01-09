@@ -74,6 +74,8 @@ pub struct Printer {
     pub driver_path: Option<String>, // 驱动路径（可选，相对于应用目录）
     #[serde(default)]
     pub driver_names: Option<Vec<String>>, // 驱动名称列表（可选，用于 Windows 安装校验）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_mode: Option<String>, // 安装方式（可选）："auto" | "package" | "installer" | "ipp" | "legacy_inf"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -495,6 +497,12 @@ fn list_printers() -> Result<Vec<String>, String> {
     crate::platform::list_printers()
 }
 
+// 获取本地已安装的打印机详细列表（包含 comment 和 location）
+#[tauri::command]
+fn list_printers_detailed() -> Result<Vec<crate::platform::windows::list::DetailedPrinterInfo>, String> {
+    crate::platform::list_printers_detailed()
+}
+
 // 安装打印机（根据 Windows 版本选择安装方式）
 // 注意：尝试使用 camelCase 参数名 driverPath，因为 Tauri 可能对带下划线的参数名 driver_path 有问题
 #[tauri::command]
@@ -504,15 +512,38 @@ async fn install_printer(
     path: String, 
     driverPath: Option<String>,  // 改为 camelCase，看看是否能解决问题
     model: Option<String>,
-    driverInstallPolicy: Option<String>  // 驱动安装策略："always" | "reuse_if_installed"
+    driverInstallPolicy: Option<String>,  // 驱动安装策略："always" | "reuse_if_installed"
+    installMode: Option<String>,  // 安装方式："auto" | "package" | "installer" | "ipp" | "legacy_inf"（使用 camelCase 匹配前端）
+    dryRun: Option<bool>  // 测试模式：true 表示仅模拟，不执行真实安装（使用 camelCase 匹配前端）
 ) -> Result<InstallResult, String> {
     // 参数校验
     if name.trim().is_empty() {
         return Err("打印机名称不能为空".to_string());
     }
     
-    // 调用平台统一的安装入口
-    crate::platform::install_printer(name, path, driverPath, model, driverInstallPolicy).await
+    // 验证并规范化 installMode
+    let valid_modes = ["auto", "package", "installer", "ipp", "legacy_inf"];
+    let normalized_mode = match &installMode {
+        Some(mode) if valid_modes.contains(&mode.as_str()) => mode.clone(),
+        Some(invalid_mode) => {
+            eprintln!("[InstallRequest] invalid installMode=\"{}\", fallback to auto", invalid_mode);
+            "auto".to_string()
+        },
+        None => {
+            eprintln!("[InstallRequest] missing installMode, fallback to auto (raw: {:?})", installMode);
+            "auto".to_string()
+        }
+    };
+    
+    // 获取 dryRun 值（默认 true，安全策略）
+    let dry_run_value = dryRun.unwrap_or(true);
+    
+    // 打印安装请求日志（包含原始参数和解析后的值）
+    eprintln!("[InstallRequest] printer=\"{}\" path=\"{}\" mode=\"{}\" dryRun={} (raw installMode: {:?}, raw dryRun: {:?})", 
+        name, path, normalized_mode, dry_run_value, installMode, dryRun);
+    
+    // 调用平台统一的安装入口（传入 dry_run）
+    crate::platform::install_printer(name, path, driverPath, model, driverInstallPolicy, installMode.clone(), dry_run_value).await
 }
 
 #[tauri::command]
@@ -526,11 +557,54 @@ fn open_url(url: String) -> Result<String, String> {
 fn print_test_page(printer_name: String) -> Result<String, String> {
     // 参数校验
     if printer_name.trim().is_empty() {
-        return Err("打印机名称不能为空".to_string());
+        return Err("[PrintTestPage] ERROR step=VALIDATE message=打印机名称不能为空".to_string());
     }
+    
+    // 打印入参（JSON 风格，显示可见字符和长度）
+    let printer_name_json = printer_name
+        .chars()
+        .map(|c| {
+            if c.is_control() {
+                format!("\\u{:04x}", c as u32)
+            } else if c == '"' {
+                "\\\"".to_string()
+            } else if c == '\\' {
+                "\\\\".to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect::<String>();
+    eprintln!("[Command] print_test_page received printer_name=\"{}\" len={} bytes={}", 
+        printer_name_json, printer_name.len(), printer_name.as_bytes().len());
     
     // 调用平台统一的打印测试页入口
     crate::platform::print_test_page(printer_name)
+}
+
+// 重装打印机
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn reinstall_printer(
+    configPrinterKey: String,
+    configPrinterPath: String,
+    configPrinterName: String,
+    driverPath: Option<String>,
+    model: Option<String>,
+    removePort: bool,
+    removeDriver: bool,
+    driverInstallStrategy: Option<String>,
+) -> Result<InstallResult, String> {
+    if configPrinterKey.trim().is_empty() {
+        return Err("配置打印机标识不能为空".to_string());
+    }
+    if configPrinterName.trim().is_empty() {
+        return Err("配置打印机名称不能为空".to_string());
+    }
+    crate::platform::reinstall_printer(
+        configPrinterKey, configPrinterPath, configPrinterName,
+        driverPath, model, removePort, removeDriver, driverInstallStrategy,
+    ).await
 }
 
 // 检查软件版本更新
@@ -875,12 +949,14 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_config,
             list_printers,
+            list_printers_detailed,
             install_printer,
             open_url,
             confirm_update_config,
             print_test_page,
             check_version_update,
-            download_update
+            download_update,
+            reinstall_printer
         ])
         .run(tauri::generate_context!());
     

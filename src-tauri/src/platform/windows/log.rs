@@ -1,5 +1,9 @@
 // Windows 平台日志工具模块
 // 用于记录打印机检测等调试信息到文件
+//
+// 日志封装入口：
+// - write_log(): 文件日志（%LOCALAPPDATA%\ePrinty\logs\printer-detect.log）
+// - truncate(): 字符串截断辅助函数（用于控制台日志）
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -74,5 +78,42 @@ pub fn write_log(message: &str) {
     
     // 立即 flush，确保日志写入磁盘
     let _ = file.flush();
+}
+
+/// 字符串截断辅助函数
+/// 
+/// # 参数
+/// - `s`: 要截断的字符串
+/// - `max_len`: 最大长度（默认 2000）
+/// 
+/// # 返回
+/// - 如果长度 <= max_len，返回原字符串
+/// - 如果长度 > max_len，返回前 max_len 字符 + "...<truncated>"
+pub fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...<truncated>", &s[..max_len])
+    }
+}
+
+/// 路径脱敏：仅保留文件名或 %TEMP% 相对路径
+/// 
+/// # 参数
+/// - `path`: 完整路径
+/// 
+/// # 返回
+/// - 如果是临时目录下的文件，返回 "%TEMP%\\filename"
+/// - 否则返回文件名
+pub fn sanitize_path(path: &std::path::Path) -> String {
+    let temp_dir = std::env::temp_dir();
+    if let Ok(relative) = path.strip_prefix(&temp_dir) {
+        format!("%TEMP%\\{}", relative.display())
+    } else {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_string()
+    }
 }
 

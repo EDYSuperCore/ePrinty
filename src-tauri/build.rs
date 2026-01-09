@@ -111,10 +111,31 @@ fn copy_config_file() {
                 }
             }
             
-            if let Err(e) = fs::copy(&config_source, &config_dest) {
-                println!("cargo:warning=无法复制 printer_config.json 到输出目录: {}", e);
+            // 在 dev 模式下（debug profile），每次都强制复制
+            // 这样可以确保开发时修改配置文件后，下次编译会自动更新
+            let should_copy = if profile == "debug" {
+                // debug 模式：总是复制（确保开发时配置文件总是最新的）
+                true
             } else {
-                println!("cargo:warning=已复制 printer_config.json 到 {:?}", config_dest);
+                // release 模式：检查源文件是否比目标文件新，或者目标文件不存在
+                match (config_source.metadata(), config_dest.metadata()) {
+                    (Ok(source_meta), Ok(dest_meta)) => {
+                        // 如果源文件比目标文件新，则复制
+                        source_meta.modified().unwrap_or(std::time::UNIX_EPOCH) 
+                            > dest_meta.modified().unwrap_or(std::time::UNIX_EPOCH)
+                    }
+                    _ => true, // 如果无法获取元数据或目标文件不存在，总是复制
+                }
+            };
+            
+            if should_copy {
+                if let Err(e) = fs::copy(&config_source, &config_dest) {
+                    println!("cargo:warning=无法复制 printer_config.json 到输出目录: {}", e);
+                } else {
+                    println!("cargo:warning=已复制 printer_config.json 到 {:?} (profile: {})", config_dest, profile);
+                }
+            } else {
+                println!("cargo:warning=配置文件已是最新，跳过复制 (profile: {})", profile);
             }
         }
     }
