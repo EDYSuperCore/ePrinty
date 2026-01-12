@@ -2,10 +2,12 @@
 // 该文件是 Windows 安装入口实现，分为 Add-Printer 与 VBS 分支
 
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fs;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tauri::Manager;
 
 
 // ============================================================================
@@ -33,6 +35,10 @@ pub struct InstallResult {
     pub method: Option<String>, // 安装方式："VBS" 或 "Add-Printer"
     pub stdout: Option<String>,  // PowerShell 标准输出
     pub stderr: Option<String>,  // PowerShell 错误输出
+    /// 实际使用的 dry_run 值（用于前端判断是否显示"模拟"提示）
+    pub effective_dry_run: bool,
+    /// 安装任务 ID（用于前端绑定进度事件）
+    pub job_id: String,
 }
 
 // ============================================================================
@@ -176,36 +182,54 @@ fn register_printer_driver(
 }
 
 async fn install_printer_package_branch(
+    app: &tauri::AppHandle,  // 用于发送进度事件
+    job_id: &str,  // 安装任务 ID
+    printer_name: &str,  // 打印机名称（用于进度事件）
     name: String,
     path: String,
-    driverPath: Option<String>,
+    inf_abs_path: Option<std::path::PathBuf>, // M2: 使用统一的 inf_abs_path
     _model: Option<String>,
     dry_run: bool,
+    driver_names: Option<Vec<String>>, // 使用传入的 driver_names（来自 effective_*）
 ) -> Result<InstallResult, String> {
     eprintln!("[PackageBranch] start printer=\"{}\" dryRun={}", name, dry_run);
     
-    // 从配置中获取 driver_names
-    let driver_names = match crate::load_local_config() {
-        Ok((config, _)) => {
-            let mut matched_driver_names: Option<Vec<String>> = None;
-            for area in &config.areas {
-                for printer in &area.printers {
-                    if printer.name == name || printer.path == path {
-                        matched_driver_names = printer.driver_names.clone();
-                        break;
-                    }
-                }
-                if matched_driver_names.is_some() {
-                    break;
-                }
-            }
-            matched_driver_names
-        }
-        Err(e) => {
-            eprintln!("[WARN] 无法加载配置文件: {}，将无法注册驱动", e);
-            None
-        }
-    };
+    // ============================================================================
+    // Preflight Gate: 检查管理员权限
+    // ============================================================================
+    let is_admin = is_running_as_admin();
+    eprintln!("[Preflight] is_admin={} printer=\"{}\" path=\"{}\"", is_admin, name, path);
+    
+    if !is_admin {
+        let inf_path_str = inf_abs_path.as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+        
+        let evidence = format!(
+            "is_admin=false printer_name=\"{}\" path=\"{}\" inf_abs_path=\"{}\"",
+            name, path, inf_path_str
+        );
+        
+        eprintln!("[Preflight] gate_failed step=check_admin_privilege evidence=\"{}\"", evidence);
+        
+        let error = InstallError::PermissionDenied {
+            step: "install_printer_package",
+            reason: "需要管理员权限安装打印机驱动（pnputil /add-driver）".to_string(),
+            evidence,
+        };
+        
+        return Ok(InstallResult {
+            success: false,
+            message: error.to_user_message(),
+            method: Some("Package".to_string()),
+            stdout: None,
+            stderr: error.format_stderr_with_code(None),
+            effective_dry_run: dry_run,
+            job_id: job_id.to_string(),
+        });
+    }
+    
+    eprintln!("[Preflight] gate_passed step=check_admin_privilege is_admin=true");
     
     let target_driver_name = match &driver_names {
         Some(names) if !names.is_empty() => {
@@ -219,49 +243,27 @@ async fn install_printer_package_branch(
                 method: Some("Package".to_string()),
                 stdout: None,
                 stderr: Some("driver_names 缺失或为空".to_string()),
+                effective_dry_run: dry_run,
+                job_id: job_id.to_string(),
             });
         }
     };
     
-    // 检查 driverPath
-    let driver_path_str = match &driverPath {
-        Some(path) if !path.trim().is_empty() => path.as_str(),
-        _ => {
+    // M2: 使用统一的 inf_abs_path（已在入口处解析和验证）
+    let inf_path = match inf_abs_path {
+        Some(path) => path,
+        None => {
             return Ok(InstallResult {
                 success: false,
-                message: "Package 安装模式需要提供 driver_path（INF 文件路径）".to_string(),
+                message: "Package 安装模式需要提供 INF 文件路径".to_string(),
                 method: Some("Package".to_string()),
                 stdout: None,
-                stderr: Some("driver_path 缺失或为空".to_string()),
+                stderr: Some("inf_abs_path 缺失".to_string()),
+                effective_dry_run: dry_run,
+                job_id: job_id.to_string(),
             });
         }
     };
-    
-    // 解析 driver_path（相对于应用目录）
-    let inf_path = match resolve_driver_path(driver_path_str) {
-        Ok(path) => path,
-        Err(e) => {
-            let stderr = e.format_stderr_with_code(None).unwrap_or_default();
-            return Ok(InstallResult {
-                success: false,
-                message: format!("缺少 driver_path 或 INF 文件不存在: {}", e.to_user_message()),
-                method: Some("Package".to_string()),
-                stdout: None,
-                stderr: Some(stderr),
-            });
-        }
-    };
-    
-    // 检查 INF 文件是否存在
-    if !inf_path.exists() {
-        return Ok(InstallResult {
-            success: false,
-            message: format!("INF 文件不存在: {}", inf_path.display()),
-            method: Some("Package".to_string()),
-            stdout: None,
-            stderr: Some(format!("文件不存在: {}", inf_path.display())),
-        });
-    }
     
     // 如果是 dryRun 模式，返回 stub 结果
     if dry_run {
@@ -272,6 +274,8 @@ async fn install_printer_package_branch(
             method: Some("Package".to_string()),
             stdout: None,
             stderr: None,
+            effective_dry_run: true, // dryRun 模式
+            job_id: job_id.to_string(),
         });
     }
     
@@ -281,7 +285,20 @@ async fn install_printer_package_branch(
     
     match stage_driver_package_windows(&inf_path) {
         Ok(stage_result) => {
-            eprintln!("[PackageBranch] pnputil stage 成功 exit={:?}", stage_result.exit_code);
+            eprintln!("[PackageBranch] pnputil stage 成功 exit={:?} is_admin={}", stage_result.exit_code, is_admin);
+            
+            // 发送 StageDriver 成功事件
+            emit_progress_event(
+                app,
+                job_id,
+                printer_name,
+                "driver.stageDriver",
+                "success",
+                "驱动包注册成功".to_string(),
+                None,
+                None,
+                Some("stageDriver".to_string()),
+            );
             
             // 从 pnputil 输出中提取 published name（oemXXX.inf）
             let published_name = extract_published_name(&stage_result.output_text);
@@ -294,6 +311,8 @@ async fn install_printer_package_branch(
                         method: Some("Package".to_string()),
                         stdout: Some(stage_result.output_text),
                         stderr: Some("无法解析 published name".to_string()),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
                     });
                 }
             };
@@ -304,9 +323,35 @@ async fn install_printer_package_branch(
             let published_inf_path = format!(r"C:\Windows\INF\{}", published_name);
             
             // 步骤：注册打印机驱动
+            // 发送 RegisterDriver 开始事件
+            emit_progress_event(
+                app,
+                job_id,
+                printer_name,
+                "driver.registerDriver",
+                "running",
+                "正在注册打印机驱动".to_string(),
+                None,
+                None,
+                Some("registerDriver".to_string()),
+            );
+            
             match register_printer_driver(&target_driver_name, &published_inf_path, dry_run) {
                 Ok(()) => {
                     eprintln!("[PackageBranch] RegisterPrinterDriver 成功");
+                    
+                    // 发送 RegisterDriver 成功事件
+                    emit_progress_event(
+                        app,
+                        job_id,
+                        printer_name,
+                        "driver.registerDriver",
+                        "success",
+                        "打印机驱动注册成功".to_string(),
+                        None,
+                        None,
+                        Some("registerDriver".to_string()),
+                    );
                     
                     // 步骤：确保端口和队列存在
                     // 检测目标类型
@@ -319,6 +364,8 @@ async fn install_printer_package_branch(
                                 method: Some("Package".to_string()),
                                 stdout: Some(stage_result.output_text),
                                 stderr: Some(e),
+                                effective_dry_run: dry_run,
+                                job_id: job_id.to_string(),
                             });
                         }
                     };
@@ -327,24 +374,72 @@ async fn install_printer_package_branch(
                         TargetType::TcpIpHost { host } => {
                             eprintln!("[PackageBranch] EnsurePrinterPort step=start inputs=host=\"{}\"", host);
                             
+                            // 发送 EnsurePort 开始事件
+                            emit_progress_event(
+                                app,
+                                job_id,
+                                printer_name,
+                                "device.ensurePort",
+                                "running",
+                                format!("正在创建端口: {}", host),
+                                None,
+                                None,
+                                Some("ensurePort".to_string()),
+                            );
+                            
                             // 检测 Windows 版本以决定是否使用 VBS
                             let windows_build = get_windows_build_number().unwrap_or(0);
                             let is_legacy = windows_build > 0 && windows_build < 10240;
                             
                             // 确保端口存在
-                            let port_name = match ensure_printer_port(&host, 9100, is_legacy) {
+                            let port_name = match ensure_printer_port(&host, 9100, is_legacy, job_id) {
                                 Ok(port) => {
                                     eprintln!("[PackageBranch] EnsurePrinterPort step=success port_name=\"{}\"", port);
+                                    
+                                    // 发送 EnsurePort 成功事件
+                                    emit_progress_event(
+                                        app,
+                                        job_id,
+                                        printer_name,
+                                        "device.ensurePort",
+                                        "success",
+                                        format!("端口创建成功: {}", port),
+                                        None,
+                                        None,
+                                        Some("ensurePort".to_string()),
+                                    );
+                                    
                                     port
                                 }
                                 Err(e) => {
                                     eprintln!("[PackageBranch] EnsurePrinterPort step=failed error=\"{}\"", e);
+                                    
+                                    // 发送 EnsurePort 失败事件
+                                    emit_progress_event(
+                                        app,
+                                        job_id,
+                                        printer_name,
+                                        "device.ensurePort",
+                                        "failed",
+                                        format!("端口创建失败: {}", e),
+                                        None,
+                                        Some(crate::ErrorPayload {
+                                            code: "ENSURE_PORT_FAILED".to_string(),
+                                            detail: format!("端口创建失败: {}", e),
+                                            stdout: None,
+                                            stderr: Some(e.clone()),
+                                        }),
+                                        Some("ensurePort".to_string()),
+                                    );
+                                    
                                     return Ok(InstallResult {
                                         success: false,
                                         message: format!("端口创建失败: {}", e),
                                         method: Some("Package".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: Some(e),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     });
                                 }
                             };
@@ -353,9 +448,45 @@ async fn install_printer_package_branch(
                             eprintln!("[PackageBranch] EnsurePrinterQueue step=start inputs=queue_name=\"{}\" driver_name=\"{}\" port_name=\"{}\"", 
                                 name, target_driver_name, port_name);
                             
+                            // 发送 EnsureQueue 开始事件
+                            emit_progress_event(
+                                app,
+                                job_id,
+                                printer_name,
+                                "device.ensureQueue",
+                                "running",
+                                format!("正在创建打印队列: {}", name),
+                                None,
+                                None,
+                                Some("ensureQueue".to_string()),
+                            );
+                            
                             match ensure_printer_queue(&name, &target_driver_name, &port_name) {
                                 Ok(()) => {
                                     eprintln!("[PackageBranch] EnsurePrinterQueue step=success");
+                                    
+                                    // 发送 EnsureQueue 成功事件
+                                    emit_progress_event(
+                                        app,
+                                        job_id,
+                                        printer_name,
+                                        "device.ensureQueue",
+                                        "success",
+                                        "打印队列创建成功".to_string(),
+                                        None,
+                                        None,
+                                        Some("ensureQueue".to_string()),
+                                    );
+                                    
+                                    // 发送 FinalVerify 成功事件
+                                    emit_final_verify_if_needed(
+                                        app,
+                                        job_id,
+                                        printer_name,
+                                        true,
+                                        Some("安装完成".to_string()),
+                                    );
+                                    
                                     Ok(InstallResult {
                                         success: true,
                                         message: format!(
@@ -365,16 +496,39 @@ async fn install_printer_package_branch(
                                         method: Some("Package".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: None,
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     })
                                 }
                                 Err(e) => {
                                     eprintln!("[PackageBranch] EnsurePrinterQueue step=failed error=\"{}\"", e);
+                                    
+                                    // 发送 EnsureQueue 失败事件
+                                    emit_progress_event(
+                                        app,
+                                        job_id,
+                                        printer_name,
+                                        "device.ensureQueue",
+                                        "failed",
+                                        format!("队列创建失败: {}", e),
+                                        None,
+                                        Some(crate::ErrorPayload {
+                                            code: "ENSURE_QUEUE_FAILED".to_string(),
+                                            detail: format!("队列创建失败: {}", e),
+                                            stdout: None,
+                                            stderr: Some(e.clone()),
+                                        }),
+                                        Some("ensureQueue".to_string()),
+                                    );
+                                    
                                     Ok(InstallResult {
                                         success: false,
                                         message: format!("队列创建失败: {}", e),
                                         method: Some("Package".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: Some(e),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     })
                                 }
                             }
@@ -395,6 +549,8 @@ async fn install_printer_package_branch(
                                     method: Some("Package".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: Some(evidence),
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 });
                             }
                             
@@ -433,6 +589,8 @@ async fn install_printer_package_branch(
                                     method: Some("Package".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: None,
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 })
                             } else {
                                 eprintln!("[PackageBranch] EnsurePrinterQueue step=create_shared inputs=connection_name=\"{}\"", conn_path);
@@ -449,6 +607,16 @@ async fn install_printer_package_branch(
                                         
                                         if exit_code == Some(0) {
                                             eprintln!("[PackageBranch] EnsurePrinterQueue step=success action=create connection=\"{}\"", conn_path);
+                                            
+                                            // 发送 FinalVerify 成功事件
+                                            emit_final_verify_if_needed(
+                                                app,
+                                                job_id,
+                                                printer_name,
+                                                true,
+                                                Some("安装完成".to_string()),
+                                            );
+                                            
                                             Ok(InstallResult {
                                                 success: true,
                                                 message: format!(
@@ -458,6 +626,8 @@ async fn install_printer_package_branch(
                                                 method: Some("Package".to_string()),
                                                 stdout: Some(stage_result.output_text),
                                                 stderr: None,
+                                                effective_dry_run: dry_run,
+                                                job_id: job_id.to_string(),
                                             })
                                         } else {
                                             let evidence = format!("add_shared_failed stdout=\"{}\" stderr=\"{}\" exit_code={:?} connection_name=\"{}\"", 
@@ -469,6 +639,8 @@ async fn install_printer_package_branch(
                                                 method: Some("Package".to_string()),
                                                 stdout: Some(stage_result.output_text),
                                                 stderr: Some(evidence),
+                                                effective_dry_run: dry_run,
+                                                job_id: job_id.to_string(),
                                             })
                                         }
                                     }
@@ -481,6 +653,8 @@ async fn install_printer_package_branch(
                                             method: Some("Package".to_string()),
                                             stdout: Some(stage_result.output_text),
                                             stderr: Some(evidence),
+                                            effective_dry_run: dry_run,
+                                            job_id: job_id.to_string(),
                                         })
                                     }
                                 }
@@ -490,6 +664,25 @@ async fn install_printer_package_branch(
                 }
                 Err(e) => {
                     eprintln!("[PackageBranch] RegisterPrinterDriver 失败: {}", e);
+                    
+                    // 发送 RegisterDriver 失败事件
+                    emit_progress_event(
+                        app,
+                        job_id,
+                        printer_name,
+                        "driver.registerDriver",
+                        "failed",
+                        format!("注册驱动失败: {}", e),
+                        None,
+                        Some(crate::ErrorPayload {
+                            code: "REGISTER_DRIVER_FAILED".to_string(),
+                            detail: format!("注册驱动失败: {}", e),
+                            stdout: None,
+                            stderr: Some(e.clone()),
+                        }),
+                        Some("registerDriver".to_string()),
+                    );
+                    
                     Ok(InstallResult {
                         success: false,
                         message: format!(
@@ -499,23 +692,52 @@ async fn install_printer_package_branch(
                         method: Some("Package".to_string()),
                         stdout: Some(stage_result.output_text),
                         stderr: Some(e),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
                     })
                 }
             }
         }
         Err(e) => {
             eprintln!("[PackageBranch] pnputil stage 失败: {}", e);
-            // 检查是否是权限错误
-            let mut error_msg = format!("pnputil stage 失败: {}", e);
+            
+            // ============================================================================
+            // 错误分类：检查是否是权限拒绝错误
+            // ============================================================================
             let error_lower = e.to_lowercase();
-            if error_lower.contains("access is denied") 
-                || error_lower.contains("0x5") 
-                || error_lower.contains("requires elevation")
-                || error_lower.contains("需要提升")
-                || error_lower.contains("权限")
-            {
-                error_msg.push_str("\n\n请以管理员身份运行");
+            let is_permission_error = error_lower.contains("权限拒绝")
+                || error_lower.contains("access is denied")
+                || error_lower.contains("拒绝访问")
+                || error_lower.contains("0x5")
+                || has_permission_error(&e);
+            
+            if is_permission_error {
+                let evidence = format!(
+                    "step=pnputil_stage printer_name=\"{}\" path=\"{}\" inf_abs_path=\"{}\" is_admin={} error=\"{}\"",
+                    name, path, inf_path.display(), is_admin, e
+                );
+                
+                eprintln!("[PackageBranch] failed step=permission_denied evidence=\"{}\"", evidence);
+                
+                let error = InstallError::PermissionDenied {
+                    step: "pnputil_stage",
+                    reason: "pnputil /add-driver 需要管理员权限".to_string(),
+                    evidence,
+                };
+                
+                return Ok(InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: Some("Package".to_string()),
+                    stdout: None,
+                    stderr: error.format_stderr_with_code(None),
+                    effective_dry_run: dry_run,
+                    job_id: job_id.to_string(),
+                });
             }
+            
+            // 其他错误（非权限错误）
+            let error_msg = format!("pnputil stage 失败: {}", e);
             
             Ok(InstallResult {
                 success: false,
@@ -523,6 +745,8 @@ async fn install_printer_package_branch(
                 method: Some("Package".to_string()),
                 stdout: None,
                 stderr: Some(e),
+                effective_dry_run: dry_run,
+                job_id: job_id.to_string(),
             })
         }
     }
@@ -534,7 +758,7 @@ async fn install_printer_package_branch(
 
 /// dryRun 模式下的模拟安装流程
 async fn install_printer_windows_dry_run(
-    name: String,
+    job_id: String,
     _path: String,
     driver_path: Option<String>,
     _model: Option<String>,
@@ -590,6 +814,8 @@ async fn install_printer_windows_dry_run(
         method: Some("dryRun".to_string()),
         stdout: None,
         stderr: None,
+        effective_dry_run: true, // 这是 dryRun 专用函数
+        job_id,
     })
 }
 
@@ -676,6 +902,12 @@ enum InstallError {
         stdout: String,
         stderr: String,
     },
+    /// 权限拒绝（需要管理员权限）
+    PermissionDenied {
+        step: &'static str,
+        reason: String,
+        evidence: String,
+    },
 }
 
 impl InstallError {
@@ -696,6 +928,7 @@ impl InstallError {
             InstallError::PrinterInstallFailedVbs { .. } => "WIN_PRINTER_INSTALL_FAILED",
             InstallError::InfInstallFailed { .. } => "WIN_INF_INSTALL_FAILED",
             InstallError::PrintUIInfInstallFailed { .. } => "WIN_PRINTUI_INF_INSTALL_FAILED",
+            InstallError::PermissionDenied { .. } => "WIN_PERMISSION_DENIED",
         }
     }
 
@@ -797,6 +1030,9 @@ impl InstallError {
                 };
                 format!("使用 PrintUIEntry 安装打印机失败。打印机: {}，驱动: {}，端口: {}，型号: {}。{}。标准输出: {}。错误输出: {}", 
                     printer_name, inf_path, port_name, model, exit_msg, stdout, stderr)
+            }
+            InstallError::PermissionDenied { step, reason, evidence } => {
+                format!("需要管理员权限才能执行 {}。{}\n\n诊断信息: {}", step, reason, evidence)
             }
         }
     }
@@ -910,6 +1146,7 @@ fn install_printer_with_printui(
     inf_path: &std::path::Path,
     port_name: &str,
     model: &str,
+    job_id: &str,
 ) -> Result<InstallResult, InstallError> {
     eprintln!("[DEBUG] 使用 PrintUIEntry /if 安装打印机: {}", printer_name);
     eprintln!("[DEBUG] INF 路径: {}", inf_path.display());
@@ -1000,6 +1237,8 @@ fn install_printer_with_printui(
                     method: Some("PrintUIEntry".to_string()),
                     stdout: Some(stdout),
                     stderr: Some(stderr),
+                    effective_dry_run: false, // PrintUIEntry 是真实安装
+                    job_id: job_id.to_string(),
                 })
             } else {
                 eprintln!("[ERROR] PrintUIEntry 执行失败，exit code: {:?}", exit_code);
@@ -1060,13 +1299,23 @@ fn pnputil_stage_succeeded(output: &str) -> bool {
 }
 
 /// 检查是否包含权限失败关键词
+/// 检查输出中是否包含权限拒绝关键词
+/// 
+/// 必须识别以下关键词（不区分大小写）：
+/// - "拒绝访问" (中文)
+/// - "Access is denied" (英文)
+/// - "0x5" (错误码)
+/// 
+/// 这些关键词一旦出现，必须强制判为 PermissionDenied，即使其他逻辑认为"可能成功"
 fn has_permission_error(output: &str) -> bool {
     let output_lower = output.to_lowercase();
-    output_lower.contains("access is denied")
-        || output_lower.contains("拒绝访问")
+    output_lower.contains("拒绝访问")
+        || output_lower.contains("access is denied")
+        || output_lower.contains("0x5")
         || output_lower.contains("需要提升")
         || output_lower.contains("requires elevation")
-        || output_lower.contains("0x5")
+        || output_lower.contains("privilege")
+        || output_lower.contains("权限")
 }
 
 /// 检查是否包含明显失败关键词
@@ -1078,6 +1327,58 @@ fn has_failure_keywords(output: &str) -> bool {
         || output_lower.contains("the system cannot find the file specified")
         || output_lower.contains("找不到")
         || output_lower.contains("no such file")
+}
+
+/// 检查当前进程是否以管理员权限运行
+/// 
+/// 使用 CheckTokenMembership（advapi32）检查管理员权限
+/// 这是更可靠的方法，比 IsUserAnAdmin 更准确
+#[cfg(windows)]
+fn is_running_as_admin() -> bool {
+    use winapi::um::winnt::TOKEN_ELEVATION;
+    use winapi::um::winnt::HANDLE;
+    use winapi::um::processthreadsapi::GetCurrentProcess;
+    use winapi::um::processthreadsapi::OpenProcessToken;
+    use winapi::um::winnt::TOKEN_QUERY;
+    use winapi::um::handleapi::CloseHandle;
+    use std::mem;
+    use std::ptr;
+    
+    unsafe {
+        let mut token: HANDLE = ptr::null_mut();
+        let process = GetCurrentProcess();
+        
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        
+        let mut elevation: TOKEN_ELEVATION = mem::zeroed();
+        let mut ret_size: u32 = 0;
+        
+        use winapi::um::securitybaseapi::GetTokenInformation;
+        use winapi::um::winnt::TokenElevation;
+        
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_size,
+        );
+        
+        CloseHandle(token);
+        
+        if result != 0 {
+            elevation.TokenIsElevated != 0
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn is_running_as_admin() -> bool {
+    false // 非 Windows 平台不需要权限提升
 }
 
 /// 从输出中提取发布名称（oemXXX.inf）
@@ -1192,6 +1493,10 @@ fn stage_driver_package_windows(inf_path: &std::path::Path) -> Result<StageResul
     let stdout = crate::platform::windows::encoding::decode_windows_string(&output.stdout);
     let stderr = crate::platform::windows::encoding::decode_windows_string(&output.stderr);
     
+    // 保存长度（在移动之前）
+    let stdout_len = stdout.len();
+    let stderr_len = stderr.len();
+    
     // 合并 stdout 和 stderr（2>&1 等效）
     let output_text = if !stderr.is_empty() {
         format!("{}\n{}", stdout, stderr)
@@ -1199,16 +1504,34 @@ fn stage_driver_package_windows(inf_path: &std::path::Path) -> Result<StageResul
         stdout
     };
     
-    // 按优先级判定成功/失败
-    // 1. 先检查权限失败关键词（优先级最高）
+    // ============================================================================
+    // 错误分类：按优先级判定成功/失败
+    // ============================================================================
+    // 优先级 1（最高）：强制检查权限拒绝关键词
+    // 一旦命中权限拒绝关键词，必须无条件返回 PermissionDenied，即使其他逻辑认为"可能成功"
     if has_permission_error(&output_text) {
         let output_preview = if output_text.len() > 300 {
             format!("{}... (truncated, total {} chars)", &output_text[..300], output_text.len())
         } else {
             output_text.clone()
         };
-        eprintln!("[StageDriverPackage] failed exit={:?} output=\"{}\"", exit_code, output_preview);
-        return Err(format!("pnputil stage 失败（权限错误）。请以管理员身份运行\n\n完整输出:\n{}", output_text));
+        
+        let evidence = format!(
+            "step=pnputil_stage exit_code={:?} stdout_len={} stderr_len={} output_preview=\"{}\"",
+            exit_code,
+            stdout_len,
+            stderr_len,
+            output_preview
+        );
+        
+        eprintln!("[StageDriverPackage] failed step=check_permission_denied exit={:?} evidence=\"{}\"", exit_code, evidence);
+        
+        // 返回 InstallError::PermissionDenied（需要修改函数签名）
+        // 暂时返回 String，后续可以改为返回 Result<StageResult, InstallError>
+        return Err(format!(
+            "pnputil stage 失败（权限拒绝）。请以管理员身份运行\n\n完整输出:\n{}\n\n诊断信息: {}",
+            output_text, evidence
+        ));
     }
     
     // 2. 检查输出内容是否表示成功（即使 exit_code 非 0）
@@ -1336,7 +1659,7 @@ fn install_inf_driver(inf_path: &std::path::Path, driver_names: &[String]) -> Re
                         eprintln!("[DEBUG] INF 驱动安装成功，找到已注册驱动: {}", driver_name);
                         Ok(())
                     }
-                    Err((e, _)) => {
+                    Err((_, _)) => {
                         // INF 安装完成但 driver_names 不可用
                         let candidates_str = driver_names.join(", ");
                         eprintln!("[WARN] INF 安装完成但 driver_names 中未找到已注册驱动。候选: {}", candidates_str);
@@ -1373,22 +1696,274 @@ fn install_inf_driver(inf_path: &std::path::Path, driver_names: &[String]) -> Re
 }
 
 /// 获取应用目录（可执行文件所在目录）
-fn get_app_directory() -> Result<std::path::PathBuf, String> {
-    std::env::current_exe()
-        .and_then(|exe_path| {
-            exe_path.parent()
-                .ok_or_else(|| std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "无法获取可执行文件目录"
-                ))
-                .map(|dir| dir.to_path_buf())
+/// 
+/// 返回可执行文件所在的目录路径
+/// 失败时返回包含 current_exe 结果的明确错误
+pub fn get_app_dir() -> Result<std::path::PathBuf, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("无法获取当前可执行文件路径: {}", e))?;
+    
+    let app_dir = exe_path.parent()
+        .ok_or_else(|| {
+            format!("无法获取可执行文件目录，exe_path={}", exe_path.display())
         })
-        .map_err(|e| format!("获取应用目录失败: {}", e))
+        .map(|dir| dir.to_path_buf())?;
+    
+    eprintln!("[Paths] AppDir={}", app_dir.display());
+    Ok(app_dir)
 }
 
-/// 解析 driver_path（相对于应用目录）
+/// 获取驱动根目录
+/// 
+/// drivers_root = app_dir.join("drivers")
+/// 不要求目录必须存在，但会在日志中打印 exists 状态
+fn get_drivers_root(app_dir: &std::path::Path) -> std::path::PathBuf {
+    let drivers_root = app_dir.join("drivers");
+    let exists = drivers_root.exists();
+    eprintln!("[Paths] DriversRoot={} exists={}", drivers_root.display(), exists);
+    drivers_root
+}
+
+/// 路径解析错误类型
+#[derive(Debug)]
+enum InfPathError {
+    /// 路径越界（zip-slip 攻击）
+    InvalidDriverPathTraversal {
+        effective_path: String,
+        resolved_path: String,
+        drivers_root: String,
+    },
+    /// 路径遍历尝试（在相对路径阶段检测到 ".." 或绝对路径）
+    PathTraversalNotAllowed {
+        effective_path: String,
+        reason: String,
+    },
+    /// 本地 INF 文件不存在
+    MissingLocalDriverInf {
+        effective_path: String,
+        inf_abs_path: String,
+    },
+}
+
+impl std::fmt::Display for InfPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InfPathError::InvalidDriverPathTraversal { effective_path, resolved_path, drivers_root } => {
+                write!(f, "路径越界检测失败: effective_path=\"{}\" resolved_path=\"{}\" drivers_root=\"{}\"", 
+                    effective_path, resolved_path, drivers_root)
+            }
+            InfPathError::PathTraversalNotAllowed { effective_path, reason } => {
+                write!(f, "路径遍历不允许: effective_path=\"{}\" reason=\"{}\"", 
+                    effective_path, reason)
+            }
+            InfPathError::MissingLocalDriverInf { effective_path, inf_abs_path } => {
+                write!(f, "本地 INF 文件不存在: effective_path=\"{}\" inf_abs_path=\"{}\"", 
+                    effective_path, inf_abs_path)
+            }
+        }
+    }
+}
+
+/// 规范化路径用于比较（去除 verbatim 前缀）
+/// 
+/// 将 \\?\ 或 \\?\UNC\ 前缀转换为普通路径格式
+/// 确保路径比较时格式一致
+fn normalize_for_compare(p: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let path_str = p.to_string_lossy();
+    
+    // 检查是否是 verbatim path (\\?\...)
+    if path_str.starts_with(r"\\?\") {
+        let without_prefix = &path_str[4..];
+        
+        // 处理 UNC 路径：\\?\UNC\server\share -> \\server\share
+        if without_prefix.starts_with(r"UNC\") {
+            let unc_path = format!(r"\\{}", &without_prefix[4..]);
+            Ok(std::path::PathBuf::from(unc_path))
+        } else {
+            // 普通 verbatim 路径：\\?\C:\... -> C:\...
+            Ok(std::path::PathBuf::from(without_prefix))
+        }
+    } else {
+        // 已经是普通路径，直接返回
+        Ok(p.to_path_buf())
+    }
+}
+
+/// 规范化相对路径，禁止路径遍历
+/// 
+/// 在相对路径阶段检查并禁止：
+/// - 绝对路径（盘符、UNC、以 / 开头）
+/// - 任何 ".." component
+/// 
+/// 返回规范化后的相对路径（去除 drivers/ 前缀后的部分）
+fn normalize_inf_rel_path(
+    effective_driver_path: &str,
+) -> Result<String, InfPathError> {
+    // 统一路径分隔符：将 '\' 和 '/' 都当作分隔符处理
+    let normalized = effective_driver_path.replace("\\", "/");
+    
+    // 检查是否是绝对路径
+    if std::path::Path::new(&normalized).is_absolute() {
+        return Err(InfPathError::PathTraversalNotAllowed {
+            effective_path: effective_driver_path.to_string(),
+            reason: "相对路径不能是绝对路径".to_string(),
+        });
+    }
+    
+    // 检查是否包含 ".." 组件
+    let path = std::path::Path::new(&normalized);
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(InfPathError::PathTraversalNotAllowed {
+                    effective_path: effective_driver_path.to_string(),
+                    reason: "相对路径不能包含 '..' 组件".to_string(),
+                });
+            }
+            std::path::Component::RootDir | std::path::Component::CurDir => {
+                // 允许 "." 和根目录（在相对路径中）
+            }
+            std::path::Component::Normal(_) => {
+                // 正常组件
+            }
+            std::path::Component::Prefix(_) => {
+                // Windows 路径前缀（不应该出现在相对路径中）
+                return Err(InfPathError::PathTraversalNotAllowed {
+                    effective_path: effective_driver_path.to_string(),
+                    reason: "相对路径不能包含路径前缀".to_string(),
+                });
+            }
+        }
+    }
+    
+    // 去除 "drivers/" 或 "drivers\" 前缀（如果存在）
+    let remaining = if normalized.starts_with("drivers/") {
+        &normalized[8..] // 去掉 "drivers/"
+    } else if normalized.starts_with("drivers\\") {
+        &normalized[8..] // 去掉 "drivers\"
+    } else {
+        // Case 3: 其他相对路径
+        &normalized
+    };
+    
+    Ok(remaining.to_string())
+}
+
+/// 解析 INF 绝对路径
+/// 
+/// 输入：effective_driver_path（M1 推导出的字符串）
+/// 输出：inf_abs_path（绝对 PathBuf，统一为普通路径格式）
+/// 
+/// 支持的路径格式：
+/// - Case 1: 绝对路径（如 "C:\...\E_WF1SGE.INF" 或 "/..."）
+/// - Case 2: 以 "drivers/" 或 "drivers\" 开头的相对路径
+/// - Case 3: 其他相对路径（相对于 drivers_root）
+/// 
+/// 包含 zip-slip 防护（对 Case 2/3）：
+/// - 在相对路径阶段禁止 ".." 和绝对路径
+/// - 在绝对路径阶段使用规范化后的路径进行比较
+fn resolve_inf_abs_path(
+    effective_driver_path: &str,
+    drivers_root: &std::path::Path,
+) -> Result<std::path::PathBuf, InfPathError> {
+    // 统一路径分隔符：将 '\' 和 '/' 都当作分隔符处理
+    let normalized = effective_driver_path.replace("\\", "/");
+    
+    // Case 1: 绝对路径
+    if std::path::Path::new(&normalized).is_absolute() {
+        let inf_abs = std::path::PathBuf::from(&normalized);
+        // 规范化绝对路径（去除 verbatim 前缀）
+        let inf_abs_normalized = normalize_for_compare(&inf_abs)
+            .map_err(|e| InfPathError::PathTraversalNotAllowed {
+                effective_path: effective_driver_path.to_string(),
+                reason: format!("无法规范化绝对路径: {}", e),
+            })?;
+        
+        eprintln!("[DriverPath] case=absolute input=\"{}\" inf_abs=\"{}\" norm_abs=\"{}\"", 
+            effective_driver_path, inf_abs.display(), inf_abs_normalized.display());
+        return Ok(inf_abs_normalized);
+    }
+    
+    // Case 2/3: 相对路径 - 在相对路径阶段检查并禁止路径遍历
+    let inf_rel = normalize_inf_rel_path(effective_driver_path)?;
+    
+    // 构建绝对路径
+    let inf_abs = drivers_root.join(&inf_rel);
+    
+    // ============================================================================
+    // 越界检测：使用规范化后的路径进行比较
+    // ============================================================================
+    // 规范化 drivers_root 和 inf_abs（去除 verbatim 前缀，统一格式）
+    let norm_drivers_root = normalize_for_compare(drivers_root)
+        .map_err(|e| InfPathError::InvalidDriverPathTraversal {
+            effective_path: effective_driver_path.to_string(),
+            resolved_path: inf_abs.display().to_string(),
+            drivers_root: format!("无法规范化 drivers_root: {}", e),
+        })?;
+    
+    // 尝试 canonicalize inf_abs（如果文件存在）
+    let inf_abs_to_check = match inf_abs.canonicalize() {
+        Ok(path) => {
+            // 文件存在，使用 canonicalize 后的路径
+            normalize_for_compare(&path)
+                .map_err(|e| InfPathError::InvalidDriverPathTraversal {
+                    effective_path: effective_driver_path.to_string(),
+                    resolved_path: path.display().to_string(),
+                    drivers_root: format!("无法规范化 resolved_path: {}", e),
+                })?
+        }
+        Err(_) => {
+            // 文件不存在，无法 canonicalize，使用原始路径（但需要规范化）
+            normalize_for_compare(&inf_abs)
+                .map_err(|e| InfPathError::InvalidDriverPathTraversal {
+                    effective_path: effective_driver_path.to_string(),
+                    resolved_path: inf_abs.display().to_string(),
+                    drivers_root: format!("无法规范化 resolved_path: {}", e),
+                })?
+        }
+    };
+    
+    // 规范化 drivers_root（如果存在，也尝试 canonicalize）
+    let norm_drivers_root_final = match norm_drivers_root.canonicalize() {
+        Ok(path) => normalize_for_compare(&path)
+            .map_err(|e| InfPathError::InvalidDriverPathTraversal {
+                effective_path: effective_driver_path.to_string(),
+                resolved_path: inf_abs_to_check.display().to_string(),
+                drivers_root: format!("无法规范化 drivers_root (canonicalize): {}", e),
+            })?,
+        Err(_) => norm_drivers_root, // 目录不存在，使用原始规范化路径
+    };
+    
+    // 使用规范化后的路径进行比较
+    let within_root = inf_abs_to_check.starts_with(&norm_drivers_root_final);
+    
+    let case = if normalized.starts_with("drivers/") || normalized.starts_with("drivers\\") {
+        "drivers_prefix"
+    } else {
+        "relative"
+    };
+    
+    eprintln!("[DriverPath] case={} input=\"{}\" inf_abs=\"{}\" norm_root=\"{}\" norm_abs=\"{}\" within_root={}", 
+        case, effective_driver_path, inf_abs.display(), 
+        norm_drivers_root_final.display(), inf_abs_to_check.display(), within_root);
+    
+    if !within_root {
+        return Err(InfPathError::InvalidDriverPathTraversal {
+            effective_path: effective_driver_path.to_string(),
+            resolved_path: inf_abs_to_check.display().to_string(),
+            drivers_root: norm_drivers_root_final.display().to_string(),
+        });
+    }
+    
+    // 返回规范化后的路径（统一为普通路径格式，不带 \\?\ 前缀）
+    Ok(inf_abs_to_check)
+}
+
+/// 解析 driver_path（相对于应用目录）- 保留用于向后兼容
+/// 新代码应使用 resolve_inf_abs_path
+#[deprecated(note = "使用 resolve_inf_abs_path 代替")]
 fn resolve_driver_path(driver_path: &str) -> Result<std::path::PathBuf, InstallError> {
-    let app_dir = get_app_directory()
+    let app_dir = get_app_dir()
         .map_err(|e| InstallError::FileOperationFailed {
             step: "resolve_driver_path",
             operation: "获取应用目录",
@@ -1564,7 +2139,7 @@ fn generate_port_name(host: &str) -> String {
 /// # 返回
 /// - `Ok(port_name)`: 端口名
 /// - `Err(String)`: 错误信息（包含 evidence）
-fn ensure_printer_port(ip_or_host: &str, port_number: u16, is_legacy: bool) -> Result<String, String> {
+fn ensure_printer_port(ip_or_host: &str, port_number: u16, is_legacy: bool, job_id: &str) -> Result<String, String> {
     use crate::platform::windows::encoding::decode_windows_string;
     
     let port_name = generate_port_name(ip_or_host);
@@ -1684,7 +2259,7 @@ fn ensure_printer_port(ip_or_host: &str, port_number: u16, is_legacy: bool) -> R
             }
         };
         
-        match add_printer_port_vbs(&script_path, &port_name, ip_or_host) {
+        match add_printer_port_vbs(&script_path, &port_name, ip_or_host, job_id) {
             Ok(_) => {
                 eprintln!("[EnsurePrinterPort] step=create_port result=success action=create method=vbs port_name=\"{}\"", port_name);
                 Ok(())
@@ -2289,7 +2864,7 @@ fn add_printer_port_modern(port_name: &str, ip_address: &str) -> Result<PortAddO
 }
 
 /// 使用现代方式添加打印机（使用指定的驱动）
-fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str, driver_name: &str) -> InstallResult {
+fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str, driver_name: &str, job_id: &str) -> InstallResult {
     eprintln!("[DEBUG] 使用驱动 '{}' 安装打印机 '{}' 到端口 '{}'", driver_name, name, port_name);
     
     // 使用指定的驱动添加打印机
@@ -2313,6 +2888,8 @@ fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str,
                     method: Some("Add-Printer".to_string()),
                     stdout: Some(printer_stdout),
                     stderr: Some(printer_stderr),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 }
             } else {
                 // 失败时包含诊断信息：驱动名、端口名、PowerShell stderr
@@ -2331,6 +2908,8 @@ fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str,
                     method: Some("Add-Printer".to_string()),
                     stdout: Some(printer_stdout),
                     stderr: Some(stderr_parts.join(" | ")),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 }
             }
         }
@@ -2352,6 +2931,8 @@ fn add_printer_with_driver_modern(name: &str, port_name: &str, ip_address: &str,
                 method: Some("Add-Printer".to_string()),
                 stdout: None,
                 stderr: Some(stderr_parts.join(" | ")),
+                effective_dry_run: false, // 这是真实安装路径
+                job_id: job_id.to_string(),
             }
         }
     }
@@ -2389,7 +2970,7 @@ fn write_vbs_script_to_temp() -> Result<std::path::PathBuf, InstallError> {
 }
 
 /// 使用 VBS 脚本方式添加打印机端口
-fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_address: &str) -> Result<InstallResult, InstallResult> {
+fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_address: &str, job_id: &str) -> Result<InstallResult, InstallResult> {
     // 使用 cscript 运行 prnport.vbs 脚本添加端口（隐藏窗口）
     // 参数参考：cscript prnport.vbs -a -r IP_192.168.x.x -h 192.168.x.x -o raw
     // 注意：移除 //B 参数以便捕获错误信息
@@ -2421,6 +3002,8 @@ fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_addre
                     method: None,
                     stdout: Some(stdout),
                     stderr: Some(stderr),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 })
             } else {
                 // 组合详细的错误信息
@@ -2447,6 +3030,8 @@ fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_addre
                     method: Some("VBS".to_string()),
                     stdout: Some(stdout),
                     stderr: error.format_stderr_with_code(Some(stderr)),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 })
             }
         }
@@ -2477,13 +3062,15 @@ fn add_printer_port_vbs(script_path: &std::path::Path, port_name: &str, ip_addre
                 method: Some("VBS".to_string()),
                 stdout: None,
                 stderr: error.format_stderr_with_code(None),
+                effective_dry_run: false, // 这是真实安装路径
+                job_id: job_id.to_string(),
             })
         }
     }
 }
 
 /// 使用 VBS 方式添加打印机（使用指定的驱动）
-fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, driver_name: &str) -> InstallResult {
+fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, driver_name: &str, job_id: &str) -> InstallResult {
     eprintln!("[DEBUG] 使用驱动 '{}' 安装打印机 '{}' 到端口 '{}' (VBS方式)", driver_name, name, port_name);
     
     // 端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
@@ -2507,6 +3094,8 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, dr
                     method: Some("VBS".to_string()),
                     stdout: Some(ps_stdout),
                     stderr: Some(ps_stderr),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 }
             } else {
                 // 失败时包含诊断信息：驱动名、端口名、PowerShell stderr
@@ -2525,6 +3114,8 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, dr
                     method: Some("VBS".to_string()),
                     stdout: Some(ps_stdout),
                     stderr: Some(stderr_parts.join(" | ")),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 }
             }
         }
@@ -2546,6 +3137,8 @@ fn add_printer_with_driver_vbs(name: &str, port_name: &str, ip_address: &str, dr
                 method: Some("VBS".to_string()),
                 stdout: None,
                 stderr: Some(stderr_parts.join(" | ")),
+                effective_dry_run: false, // 这是真实安装路径
+                job_id: job_id.to_string(),
             }
         }
     }
@@ -2565,22 +3158,24 @@ fn generate_stable_id(printer_name: &str, printer_path: &str) -> String {
     match crate::load_local_config() {
         Ok((config, _)) => {
             // 在所有 areas 中查找匹配的 printer
-            for area in &config.areas {
-                for printer in &area.printers {
-                    if printer.name == printer_name || printer.path == printer_path {
-                        // 检查是否有 id 字段（虽然当前结构体没有，但为将来扩展预留）
-                        // 如果没有 id，生成 hash
-                        let ip = printer_path.trim_start_matches("\\\\").trim_start_matches("\\").to_string();
-                        let hash_input = format!("{}|{}|{}", area.name, printer.name, ip);
-                        
-                        // 使用 DefaultHasher 生成 hash（简单且跨机器一致）
-                        let mut hasher = DefaultHasher::new();
-                        hash_input.hash(&mut hasher);
-                        let hash = hasher.finish();
-                        
-                        // 转换为 base64 编码的字符串（更短且可读）
-                        // 使用简单的 hex 编码
-                        return format!("{:x}", hash);
+            for city in &config.cities {
+                for area in &city.areas {
+                    for printer in &area.printers {
+                        if printer.name == printer_name || printer.path == printer_path {
+                            // 检查是否有 id 字段（虽然当前结构体没有，但为将来扩展预留）
+                            // 如果没有 id，生成 hash
+                            let ip = printer_path.trim_start_matches("\\\\").trim_start_matches("\\").to_string();
+                            let hash_input = format!("{}|{}|{}", area.area_name, printer.name, ip);
+                            
+                            // 使用 DefaultHasher 生成 hash（简单且跨机器一致）
+                            let mut hasher = DefaultHasher::new();
+                            hash_input.hash(&mut hasher);
+                            let hash = hasher.finish();
+                            
+                            // 转换为 base64 编码的字符串（更短且可读）
+                            // 使用简单的 hex 编码
+                            return format!("{:x}", hash);
+                        }
                     }
                 }
             }
@@ -2627,6 +3222,143 @@ impl DriverInstallPolicy {
     }
 }
 
+/// 发送安装进度事件的辅助函数（兼容旧版本，保留用于过渡期）
+/// 注意：此函数已废弃，应使用 StepReporter 替代
+#[allow(dead_code)]
+fn emit_progress_event(
+    app: &tauri::AppHandle,
+    job_id: &str,
+    printer_name: &str,
+    step_id: &str,
+    state: &str,
+    message: String,
+    progress: Option<crate::ProgressPayload>,
+    error: Option<crate::ErrorPayload>,
+    legacy_phase: Option<String>,
+) {
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    let event = crate::InstallProgressEvent {
+        job_id: job_id.to_string(),
+        printer_name: printer_name.to_string(),
+        step_id: step_id.to_string(),
+        state: state.to_string(),
+        message,
+        ts_ms,
+        progress,
+        error,
+        meta: None,
+        legacy_phase,
+    };
+    
+    // 统一日志：在emit调用之后打印，包含emit的Result
+    match app.emit_all("install_progress", &event) {
+        Ok(_) => {
+            eprintln!(
+                "[ProgressEmit] jobId={} printer={} stepId={} state={} result=Ok",
+                job_id, printer_name, step_id, state
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[ProgressEmit] jobId={} printer={} stepId={} state={} result=Err error=\"{}\"",
+                job_id, printer_name, step_id, state, e
+            );
+        }
+    }
+}
+
+/// 辅助函数：发送 job.done 事件
+fn emit_job_done(
+    app: &tauri::AppHandle,
+    job_id: &str,
+    printer_name: &str,
+    success: bool,
+    message: Option<String>,
+    error: Option<crate::ErrorPayload>,
+) {
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    let state = if success { "success" } else { "failed" };
+    let final_message = message.unwrap_or_else(|| {
+        if success {
+            "安装完成".to_string()
+        } else {
+            "安装失败".to_string()
+        }
+    });
+    
+    let done_event = crate::InstallProgressEvent {
+        job_id: job_id.to_string(),
+        printer_name: printer_name.to_string(),
+        step_id: "job.done".to_string(),
+        state: state.to_string(),
+        message: final_message,
+        ts_ms,
+        progress: None,
+        error,
+        meta: None,
+        legacy_phase: None,
+    };
+    
+    let _ = app.emit_all("install_progress", &done_event);
+    eprintln!("[InstallPrinterWindows] job.done event emitted for jobId={} state={}", job_id, state);
+}
+
+/// 辅助函数：发送 finalVerify 事件（如果尚未发送）
+fn emit_final_verify_if_needed(
+    app: &tauri::AppHandle,
+    job_id: &str,
+    printer_name: &str,
+    success: bool,
+    message: Option<String>,
+) {
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    let state = if success { "success" } else { "failed" };
+    let final_message = message.unwrap_or_else(|| {
+        if success {
+            "安装完成".to_string()
+        } else {
+            "安装失败".to_string()
+        }
+    });
+    
+    let verify_event = crate::InstallProgressEvent {
+        job_id: job_id.to_string(),
+        printer_name: printer_name.to_string(),
+        step_id: "device.finalVerify".to_string(),
+        state: state.to_string(),
+        message: final_message,
+        ts_ms,
+        progress: if success {
+            Some(crate::ProgressPayload {
+                current: Some(100),
+                total: Some(100),
+                unit: Some("percent".to_string()),
+                percent: Some(100.0),
+            })
+        } else {
+            None
+        },
+        error: None,
+        meta: None,
+        legacy_phase: Some("finalVerify".to_string()),
+    };
+    
+    let _ = app.emit_all("install_progress", &verify_event);
+    eprintln!("[InstallPrinterWindows] finalVerify event emitted for jobId={} state={}", job_id, state);
+}
+
 /// Windows 平台打印机安装入口
 /// 
 /// 根据 Windows 版本自动选择安装方式：
@@ -2634,22 +3366,196 @@ impl DriverInstallPolicy {
 /// - Windows 7/8 (构建号 < 10240): 使用 VBS 脚本 + Add-Printer
 #[allow(non_snake_case)]
 pub async fn install_printer_windows(
+    app: tauri::AppHandle,  // 用于发送进度事件
     name: String,
     path: String,
     driverPath: Option<String>,
     #[allow(unused_variables)] model: Option<String>,
     driverInstallPolicy: Option<String>,  // 驱动安装策略："always" | "reuse_if_installed"
+    driverKey: Option<String>,  // v2.0.0+：驱动键（用于 meta 记录）
     installMode: Option<String>,  // 安装方式："auto" | "package" | "installer" | "ipp" | "legacy_inf"（使用 camelCase 匹配前端）
     dry_run: bool,  // 测试模式：true 表示仅模拟，不执行真实安装
+) -> Result<InstallResult, String> {
+    
+    // 生成 jobId（一次安装=一个 jobId）
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let random_suffix = (timestamp % 10000) as u32; // 简单的随机后缀
+    let job_id = format!("job_{}_{}", timestamp, random_suffix);
+    
+    eprintln!("[InstallPrinterWindows] jobId={} printer=\"{}\" installMode={:?} driverKey={:?} dry_run={}", 
+        job_id, name, installMode, driverKey, dry_run);
+    
+    // 发送 job.init 事件（让前端能立即绑定 jobId，包含 installMode 和 driverKey meta）
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    let mut meta = serde_json::Map::new();
+    meta.insert("installMode".to_string(), serde_json::Value::String(
+        installMode.clone().unwrap_or_else(|| "auto".to_string())
+    ));
+    meta.insert("driverKey".to_string(), serde_json::Value::String(
+        driverKey.clone().unwrap_or_else(|| "(unknown)".to_string())
+    ));
+    meta.insert("dryRun".to_string(), serde_json::Value::Bool(dry_run));
+    
+    let init_event = crate::InstallProgressEvent {
+                        job_id: job_id.to_string(),
+        printer_name: name.clone(),
+        step_id: "job.init".to_string(),
+        state: "running".to_string(),
+        message: "开始安装".to_string(),
+        ts_ms,
+        progress: None,
+        error: None,
+        meta: Some(serde_json::Value::Object(meta)),
+        legacy_phase: None,
+    };
+    
+    let _ = app.emit_all("install_progress", &init_event);
+    eprintln!("[InstallPrinterWindows] job.init event emitted for jobId={}", job_id);
+    
+    // 执行安装逻辑，并在所有返回点 emit job.done
+    let result = install_printer_windows_inner(
+        app.clone(),
+        name.clone(),
+        path,
+        driverPath,
+        model,
+        driverInstallPolicy,
+        installMode,
+        dry_run,
+        &job_id,
+    ).await;
+    
+    // 在所有返回点之前 emit job.done
+    match &result {
+        Ok(install_result) => {
+            let error_payload = if !install_result.success {
+                Some(crate::ErrorPayload {
+                    code: "INSTALL_FAILED".to_string(),
+                    detail: install_result.message.clone(),
+                    stdout: install_result.stdout.clone(),
+                    stderr: install_result.stderr.clone(),
+                })
+            } else {
+                None
+            };
+            emit_job_done(
+                &app,
+                &job_id,
+                &name,
+                install_result.success,
+                Some(install_result.message.clone()),
+                error_payload,
+            );
+        }
+        Err(err_msg) => {
+            emit_job_done(
+                &app,
+                &job_id,
+                &name,
+                false,
+                Some(err_msg.clone()),
+                Some(crate::ErrorPayload {
+                    code: "INSTALL_ERROR".to_string(),
+                    detail: err_msg.clone(),
+                    stdout: None,
+                    stderr: None,
+                }),
+            );
+        }
+    }
+    
+    result
+}
+
+/// 内部安装逻辑（不 emit job.done，由外层函数负责）
+#[allow(non_snake_case)]
+async fn install_printer_windows_inner(
+    app: tauri::AppHandle,
+    name: String,
+    path: String,
+    driverPath: Option<String>,
+    #[allow(unused_variables)] model: Option<String>,
+    driverInstallPolicy: Option<String>,
+    installMode: Option<String>,
+    dry_run: bool,
+    job_id: &str,
 ) -> Result<InstallResult, String> {
     
     // 打印接收到的参数
     eprintln!("[InstallPrinterWindows] received installMode={:?} dry_run={}", installMode, dry_run);
     
+    // ============================================================================
+    // Preflight: 检查管理员权限（在所有安装分支前）
+    // ============================================================================
+    let is_admin = is_running_as_admin();
+    eprintln!("[Preflight] is_admin={} printer=\"{}\" path=\"{}\"", is_admin, name, path);
+    
+    // 先推导 effective_* 字段（用于 dry_run 和实际安装）
+    let (effective_spec, matched_printer) = match crate::load_local_config() {
+        Ok((config, _)) => {
+            let mut matched_printer: Option<&crate::Printer> = None;
+            'outer: for city in &config.cities {
+                for area in &city.areas {
+                    for printer in &area.printers {
+                        if printer.name == name || printer.path == path {
+                            matched_printer = Some(printer);
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            
+            if let Some(printer) = matched_printer {
+                let effective_spec = crate::resolve_effective_driver_spec(
+                    printer,
+                    config.driver_catalog.as_ref(),
+                );
+                (effective_spec, Some(printer.clone()))
+            } else {
+                let effective_spec = crate::EffectiveDriverSpec {
+                    source: "legacy".to_string(),
+                    effective_install_mode: installMode.clone(),
+                    effective_driver_path: driverPath.clone(),
+                    effective_driver_names: vec![],
+                    driver_key_used: None,
+                    remote_driver: None,
+                };
+                (effective_spec, None)
+            }
+        }
+        Err(_) => {
+            let effective_spec = crate::EffectiveDriverSpec {
+                source: "legacy".to_string(),
+                effective_install_mode: installMode.clone(),
+                effective_driver_path: driverPath.clone(),
+                effective_driver_names: vec![],
+                driver_key_used: None,
+                remote_driver: None,
+            };
+            (effective_spec, None)
+        }
+    };
+    
+    let resolved_install_mode = effective_spec.effective_install_mode.clone();
+    let resolved_driver_path = effective_spec.effective_driver_path.clone();
+    
     // 如果是 dryRun 模式，执行模拟安装流程
     if dry_run {
         eprintln!("[InstallPrinterWindows] entering dryRun mode");
-        return install_printer_windows_dry_run(name, path, driverPath, model, installMode).await;
+        return install_printer_windows_dry_run(
+            job_id.to_string(),
+            path,
+            resolved_driver_path,
+            model,
+            resolved_install_mode
+        ).await;
     }
     
     eprintln!("[InstallPrinterWindows] dryRun=false, entering real installation path");
@@ -2667,22 +3573,323 @@ pub async fn install_printer_windows(
         LegacyFallback,
     }
     
-    // 解析 installMode（用于判断安装策略分流）
-    let valid_modes = ["auto", "package", "installer", "ipp", "legacy_inf"];
-    let resolved_mode = match &installMode {
-        Some(mode) if valid_modes.contains(&mode.as_str()) => mode.as_str(),
-        Some(invalid_mode) => {
-            eprintln!("[InstallRequest] invalid installMode=\"{}\", fallback to auto", invalid_mode);
-            "auto"
-        },
-        None => {
-            eprintln!("[InstallRequest] missing install_mode, fallback to auto");
-            "auto"
+    // ============================================================================
+    // 路由决策：收集输入信息并打印 RoutingDecision 日志
+    // ============================================================================
+    let has_model = model.as_ref().map(|m| !m.trim().is_empty()).unwrap_or(false);
+    
+    // 打印 RoutingDecision 日志（使用已推导的 effective_spec）
+    if let Some(printer) = &matched_printer {
+        let reason = if effective_spec.source == "catalog" {
+            "catalog_hit"
+        } else if printer.driver_key.is_some() {
+            match crate::load_local_config() {
+                Ok((config, _)) => {
+                    if config.driver_catalog.is_none() {
+                        "catalog_missing"
+                    } else {
+                        "key_not_found"
+                    }
+                }
+                Err(_) => "catalog_missing"
+            }
+        } else {
+            "key_missing"
+        };
+        
+        let driver_names_preview = if effective_spec.effective_driver_names.len() > 0 {
+            let preview: Vec<String> = effective_spec.effective_driver_names.iter()
+                .take(3)
+                .map(|s| s.clone())
+                .collect();
+            format!("[{} items: {}]", effective_spec.effective_driver_names.len(), preview.join(", "))
+        } else {
+            "[empty]".to_string()
+        };
+        
+        eprintln!("[RoutingDecision] printer=\"{}\" path=\"{}\" driverKey={:?} source={} reason={} effective_install_mode={:?} effective_driver_path={:?} effective_driver_names={}",
+            printer.name,
+            printer.path,
+            printer.driver_key,
+            effective_spec.source,
+            reason,
+            effective_spec.effective_install_mode,
+            effective_spec.effective_driver_path,
+            driver_names_preview
+        );
+    } else {
+        eprintln!("[RoutingDecision] printer=\"{}\" path=\"{}\" driverKey=None source=legacy reason=printer_not_found_in_config effective_install_mode={:?} effective_driver_path={:?} effective_driver_names=[]",
+            name, path, effective_spec.effective_install_mode, effective_spec.effective_driver_path);
+    }
+    
+    // ============================================================================
+    // M2.5: 输出 DriverRemote 日志（仅用于诊断，不影响安装决策）
+    // ============================================================================
+    if effective_spec.source == "catalog" {
+        if let Some(remote) = &effective_spec.remote_driver {
+            // remote_driver 存在，说明 url 和 sha256 都有
+            // 提取 URL 域名和路径摘要（避免泄露 token）
+            let url_display = if let Some(domain_end) = remote.url.find("://") {
+                let after_protocol = &remote.url[domain_end + 3..];
+                if let Some(path_start) = after_protocol.find('/') {
+                    let domain = &after_protocol[..path_start];
+                    let path = &after_protocol[path_start..];
+                    let path_summary = if path.len() > 50 {
+                        format!("{}...", &path[..50])
+                    } else {
+                        path.to_string()
+                    };
+                    format!("{}://{}{}", &remote.url[..domain_end + 3], domain, path_summary)
+                } else {
+                    format!("{}://{}", &remote.url[..domain_end + 3], after_protocol)
+                }
+            } else {
+                remote.url.clone()
+            };
+            
+            // sha256 只显示前 12 位
+            let sha256_preview = if remote.sha256.len() >= 12 {
+                &remote.sha256[..12]
+            } else {
+                &remote.sha256
+            };
+            
+            eprintln!("[DriverRemote] remote_available=true driver_key=\"{}\" url=\"{}\" sha256={}... version={:?} layout={:?}",
+                remote.driver_key, url_display, sha256_preview, remote.version, remote.layout);
+        } else {
+            // catalog 存在但 remote 字段缺失或不完整
+            let reason = matched_printer.as_ref()
+                .and_then(|p| p.driver_key.as_ref())
+                .and_then(|key| {
+                    // 在闭包内部完成所有检查，避免返回引用
+                    crate::load_local_config().ok()
+                        .and_then(|(config, _)| {
+                            config.driver_catalog.as_ref()
+                                .and_then(|cat| cat.get(key))
+                                .and_then(|entry| entry.remote.as_ref())
+                                .map(|remote| {
+                                    if remote.url.is_none() || remote.sha256.is_none() {
+                                        "remote_missing_fields"
+                                    } else {
+                                        "remote_empty_fields"
+                                    }
+                                })
+                        })
+                })
+                .unwrap_or_else(|| "remote_missing");
+            
+            eprintln!("[DriverRemote] remote_available=false reason={}", reason);
         }
+    } else {
+        // legacy 模式
+        let reason = if matched_printer.is_none() {
+            "printer_not_found_in_config"
+        } else if matched_printer.as_ref().and_then(|p| p.driver_key.as_ref()).is_none() {
+            "no_driverKey"
+        } else {
+            // driver_key 存在但未命中 catalog
+            match crate::load_local_config() {
+                Ok((config, _)) => {
+                    if config.driver_catalog.is_none() {
+                        "catalog_missing"
+                    } else {
+                        "key_not_found"
+                    }
+                }
+                Err(_) => "catalog_missing"
+            }
+        };
+        
+        eprintln!("[DriverRemote] remote_available=false reason={}", reason);
+    }
+    
+    // 使用 effective_* 字段作为输入变量
+    let resolved_install_mode = effective_spec.effective_install_mode.as_deref().unwrap_or("auto");
+    let resolved_driver_path = effective_spec.effective_driver_path.clone();
+    let resolved_driver_names = effective_spec.effective_driver_names.clone();
+    
+    // ============================================================================
+    // M2: 统一路径解析 - 将 effective_driver_path 解析为 inf_abs_path
+    // ============================================================================
+    let inf_abs_path = if let Some(effective_path) = &resolved_driver_path {
+        if !effective_path.trim().is_empty() {
+            // 获取应用目录和驱动根目录
+            let app_dir = match get_app_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    return Ok(InstallResult {
+                        success: false,
+                        message: format!("无法获取应用目录: {}", e),
+                        method: None,
+                        stdout: None,
+                        stderr: Some(e),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
+                    });
+                }
+            };
+            
+            let drivers_root = get_drivers_root(&app_dir);
+            
+            // 解析 INF 绝对路径
+            match resolve_inf_abs_path(effective_path, &drivers_root) {
+                Ok(inf_abs) => {
+                    // 检查文件是否存在（fail-fast）
+                    let exists = inf_abs.exists();
+                    eprintln!("[DriverPath] source={} input=\"{}\" inf_abs=\"{}\" exists={}", 
+                        effective_spec.source, effective_path, inf_abs.display(), exists);
+                    
+                    if !exists {
+                        // ============================================================================
+                        // M3b: 如果本地 INF 不存在，尝试从 remote 自动下载并 bootstrap
+                        // ============================================================================
+                        eprintln!("[DriverBootstrap] step=missing_local_inf effective_path=\"{}\" inf_abs=\"{}\"", 
+                            effective_path, inf_abs.display());
+                        
+                        // 检查是否有 remote_driver 可用
+                        if let Some(remote_driver) = &effective_spec.remote_driver {
+                            eprintln!("[DriverBootstrap] step=missing_local_inf result=remote_available driver_key=\"{}\"", 
+                                remote_driver.driver_key);
+                            
+                            // 执行 bootstrap 流程
+                            match crate::platform::windows::driver_bootstrap::bootstrap_driver_from_remote(
+                                remote_driver,
+                                &drivers_root,
+                                effective_path,
+                                Some(&app),
+                                Some(&name),
+                                &job_id,
+                            ).await {
+                                Ok(_bootstrap_result) => {
+                                    eprintln!("[DriverBootstrap] step=bootstrap_complete");
+                                    
+                                    // Bootstrap 完成后，重新解析并检查 INF 文件
+                                    match resolve_inf_abs_path(effective_path, &drivers_root) {
+                                        Ok(inf_abs_after) => {
+                                            let exists_after = inf_abs_after.exists();
+                                            eprintln!("[DriverBootstrap] step=final_check inputs=effective_path=\"{}\" inf_abs=\"{}\" outputs=exists={}", 
+                                                effective_path, inf_abs_after.display(), exists_after);
+                                            
+                                            if !exists_after {
+                                                // Bootstrap 后仍不存在
+                                                let evidence = format!(
+                                                    "effective_path=\"{}\" inf_abs=\"{}\" bootstrap_completed=true",
+                                                    effective_path, inf_abs_after.display()
+                                                );
+                                                
+                                                return Ok(InstallResult {
+                                                    success: false,
+                                                    message: format!(
+                                                        "Bootstrap 后 INF 文件仍不存在\n\neffective_driver_path: {}\ninf_abs_path: {}\n\n请检查驱动包结构",
+                                                        effective_path, inf_abs_after.display()
+                                                    ),
+                                                    method: None,
+                                                    stdout: None,
+                                                    stderr: Some(format!("InfNotFoundAfterBootstrap: {}", evidence)),
+                                                    effective_dry_run: dry_run,
+                                                    job_id: job_id.to_string(),
+                                                });
+                                            }
+                                            
+                                            // Bootstrap 成功，使用新的 inf_abs_path
+                                            Some(inf_abs_after)
+                                        }
+                                        Err(e) => {
+                                            let error_msg = format!("Bootstrap 后路径解析失败: {}", e);
+                                            eprintln!("[DriverBootstrap] step=final_check result=failed error=\"{}\"", error_msg);
+                                            
+                                            return Ok(InstallResult {
+                                                success: false,
+                                                message: error_msg.clone(),
+                                                method: None,
+                                                stdout: None,
+                                                stderr: Some(error_msg),
+                                                effective_dry_run: dry_run,
+                                                job_id: job_id.to_string(),
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(bootstrap_error) => {
+                                    let error_msg = format!("Bootstrap 失败: {}", bootstrap_error);
+                                    eprintln!("[DriverBootstrap] step=bootstrap_failed error=\"{}\"", error_msg);
+                                    
+                                    return Ok(InstallResult {
+                                        success: false,
+                                        message: error_msg.clone(),
+                                        method: None,
+                                        stdout: None,
+                                        stderr: Some(error_msg),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
+                                    });
+                                }
+                            }
+                        } else {
+                            // 没有 remote_driver，返回原始错误
+                            eprintln!("[DriverBootstrap] step=missing_local_inf result=remote_unavailable");
+                            
+                            return Ok(InstallResult {
+                                success: false,
+                                message: format!(
+                                    "本地 INF 文件不存在\n\neffective_driver_path: {}\ninf_abs_path: {}\n\n请确保驱动文件已放置在正确位置",
+                                    effective_path, inf_abs.display()
+                                ),
+                                method: None,
+                                stdout: None,
+                                stderr: Some(format!("MissingLocalDriverInf: effective_path=\"{}\" inf_abs_path=\"{}\"", 
+                                    effective_path, inf_abs.display())),
+                                effective_dry_run: dry_run,
+                                job_id: job_id.to_string(),
+                            });
+                        }
+                    } else {
+                        // 文件存在，直接使用
+                        Some(inf_abs)
+                    }
+                }
+                Err(e) => {
+                    let error_msg = match e {
+                        InfPathError::InvalidDriverPathTraversal { effective_path, resolved_path, drivers_root } => {
+                            format!("路径越界检测失败: effective_path=\"{}\" resolved_path=\"{}\" drivers_root=\"{}\"", 
+                                effective_path, resolved_path, drivers_root)
+                        }
+                        InfPathError::PathTraversalNotAllowed { effective_path, reason } => {
+                            format!("路径遍历不允许: effective_path=\"{}\" reason=\"{}\"", 
+                                effective_path, reason)
+                        }
+                        InfPathError::MissingLocalDriverInf { effective_path, inf_abs_path } => {
+                            format!("本地 INF 文件不存在: effective_path=\"{}\" inf_abs_path=\"{}\"", 
+                                effective_path, inf_abs_path)
+                        }
+                    };
+                    
+                    eprintln!("[DriverPath] source={} input=\"{}\" error=\"{}\"", 
+                        effective_spec.source, effective_path, error_msg);
+                    
+                    return Ok(InstallResult {
+                        success: false,
+                        message: error_msg.clone(),
+                        method: None,
+                        stdout: None,
+                        stderr: Some(error_msg),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
+                    });
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
     };
     
-    // 确定路由策略
-    let routing_policy = if resolved_mode == "package" {
+    let has_driver_names = !resolved_driver_names.is_empty() && resolved_driver_names.iter().any(|n| !n.trim().is_empty());
+    let has_driver_package = resolved_install_mode == "package";
+    
+    // 确定路由策略（使用 effective_install_mode）
+    let routing_policy = if resolved_install_mode == "package" {
         // 当 installMode="package"：强制 modern_only（禁止 PrintUIEntry）
         RoutingPolicy::ModernOnly
     } else {
@@ -2691,45 +3898,11 @@ pub async fn install_printer_windows(
     };
     
     eprintln!("[InstallRequest] printer=\"{}\" path=\"{}\" mode={} resolved={} routing_policy={:?} dryRun={}", 
-        name, path, installMode.as_deref().unwrap_or("auto"), resolved_mode, routing_policy, dry_run);
+        name, path, installMode.as_deref().unwrap_or("auto"), resolved_install_mode, routing_policy, dry_run);
     
-    // ============================================================================
-    // 路由决策：收集输入信息
-    // ============================================================================
-    let has_driver_package = resolved_mode == "package";
-    let has_driver_path = driverPath.as_ref().map(|p| !p.trim().is_empty()).unwrap_or(false);
-    let has_model = model.as_ref().map(|m| !m.trim().is_empty()).unwrap_or(false);
-    
-    // 从配置中获取 driver_names
-    let driver_names_option = match crate::load_local_config() {
-        Ok((config, _)) => {
-            let mut matched_driver_names: Option<Vec<String>> = None;
-            for area in &config.areas {
-                for printer in &area.printers {
-                    if printer.name == name || printer.path == path {
-                        matched_driver_names = printer.driver_names.clone();
-                        break;
-                    }
-                }
-                if matched_driver_names.is_some() {
-                    break;
-                }
-            }
-            matched_driver_names
-        }
-        Err(e) => {
-            eprintln!("[WARN] 无法加载配置文件: {}，跳过配置校验", e);
-            None
-        }
-    };
-    
-    let has_driver_names = driver_names_option.as_ref()
-        .map(|names| !names.is_empty() && names.iter().any(|n| !n.trim().is_empty()))
-        .unwrap_or(false);
-    
-    // 强制打印 RoutingDecision 日志
+    // 强制打印 RoutingDecision 日志（兼容旧格式）
     eprintln!("[RoutingDecision] policy={:?} inputs=installMode={:?} driverPackage={} driverPath={} driver_name={} model={} target_path=\"{}\"", 
-        routing_policy, resolved_mode, has_driver_package, has_driver_path, has_driver_names, has_model, path);
+        routing_policy, resolved_install_mode, has_driver_package, inf_abs_path.is_some(), has_driver_names, has_model, path);
     
     // ============================================================================
     // 路由决策：选择安装路径
@@ -2738,15 +3911,15 @@ pub async fn install_printer_windows(
     // 优先级 1：如果有 driver package（或已选择 package 模式）
     if has_driver_package {
         eprintln!("[RoutingDecision] selected_path=package reason=installMode_is_package");
-        return install_printer_package_branch(name, path, driverPath, model, dry_run).await;
+        return install_printer_package_branch(&app, &job_id, &name.clone(), name.clone(), path, inf_abs_path.clone(), model, dry_run, Some(resolved_driver_names.clone())).await;
     }
     
-    // 优先级 2：如果没有 package，但有 INF（driverPath）
-    if has_driver_path {
+    // 优先级 2：如果没有 package，但有 INF（resolved_driver_path）
+    if resolved_driver_path.is_some() {
         // 需要确定 driver_name
         let target_driver_name = if has_driver_names {
             // a) 配置显式 driver_name（使用第一个）
-            Some(driver_names_option.as_ref().unwrap()[0].clone())
+            Some(resolved_driver_names[0].clone())
         } else if has_model {
             // b) 若配置有 model：从 INF 中匹配得到 driver_name
             // 简化实现：如果无法匹配则失败并提示需要配置 driver_name
@@ -2762,58 +3935,34 @@ pub async fn install_printer_windows(
             // 有 driver_name，尝试 modern_inf 路径
             eprintln!("[RoutingDecision] selected_path=modern_inf reason=has_driverPath_and_driver_name");
             
-            // 解析 driver_path
-            let inf_path = match resolve_driver_path(driverPath.as_ref().unwrap()) {
-                Ok(path) => {
-                    // 检查 INF 文件是否存在
-                    if !path.exists() {
-                        let evidence = format!("inf_file_not_exists path=\"{}\"", path.display());
-                        eprintln!("[RoutingDecision] modern_inf_failed step=check_inf_exists evidence=\"{}\"", evidence);
-                        
-                        if matches!(routing_policy, RoutingPolicy::LegacyFallback) {
-                            eprintln!("[RoutingDecision] fallback_to_legacy reason=inf_file_not_exists path=\"{}\"", path.display());
-                            // 继续到 legacy 路径（设置标志，跳出 match）
-                            return Ok(InstallResult {
-                                success: false,
-                                message: format!("INF 文件不存在，fallback 到 legacy 路径: {}\n\nEvidence: {}", path.display(), evidence),
-                                method: Some("ModernInf".to_string()),
-                                stdout: None,
-                                stderr: Some(evidence),
-                            });
-                        } else {
-                            return Ok(InstallResult {
-                                success: false,
-                                message: format!("INF 文件不存在: {}\n\nEvidence: {}", path.display(), evidence),
-                                method: Some("ModernInf".to_string()),
-                                stdout: None,
-                                stderr: Some(evidence),
-                            });
-                        }
-                    }
-                    path
-                }
-                Err(e) => {
-                    let evidence = format!("resolve_driver_path_failed error=\"{}\"", e.to_user_message());
-                    eprintln!("[RoutingDecision] modern_inf_failed step=resolve_driver_path evidence=\"{}\"", evidence);
+            // M2: 使用统一的 inf_abs_path（已在入口处解析和验证）
+            let inf_path = match &inf_abs_path {
+                Some(path) => path.clone(),
+                None => {
+                    let evidence = "inf_abs_path_missing".to_string();
+                    eprintln!("[RoutingDecision] modern_inf_failed step=check_inf_abs_path evidence=\"{}\"", evidence);
                     
-                    // 根据 routing_policy 决定是否 fallback
                     if matches!(routing_policy, RoutingPolicy::LegacyFallback) {
-                        eprintln!("[RoutingDecision] fallback_to_legacy reason=resolve_driver_path_failed error=\"{}\"", e.to_user_message());
-                        // 继续到 legacy 路径（返回错误，但标记为 fallback）
+                        eprintln!("[RoutingDecision] fallback_to_legacy reason=inf_abs_path_missing");
+                        // 继续到 legacy 路径
                         return Ok(InstallResult {
                             success: false,
-                            message: format!("无法解析 driver_path，fallback 到 legacy 路径: {}\n\nEvidence: {}", e.to_user_message(), evidence),
+                            message: format!("INF 路径缺失，fallback 到 legacy 路径\n\nEvidence: {}", evidence),
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     } else {
                         return Ok(InstallResult {
                             success: false,
-                            message: format!("无法解析 driver_path: {}\n\nEvidence: {}", e.to_user_message(), evidence),
+                            message: format!("INF 路径缺失\n\nEvidence: {}", evidence),
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     }
                 }
@@ -2823,14 +3972,59 @@ pub async fn install_printer_windows(
             eprintln!("[ModernInf] step=start inputs=inf_path=\"{}\" driver_name=\"{}\"", inf_path.display(), driver_name);
             
             // 步骤 1：pnputil stage
+            // 发送 StageDriver 开始事件
+            emit_progress_event(
+                &app,
+                &job_id,
+                &name,
+                "driver.stageDriver",
+                "running",
+                "正在注册驱动包".to_string(),
+                None,
+                None,
+                Some("stageDriver".to_string()),
+            );
+            
             let stage_result = match stage_driver_package_windows(&inf_path) {
                 Ok(result) => {
                     eprintln!("[ModernInf] step=pnputil_stage result=success exit_code={:?}", result.exit_code);
+                    
+                    // 发送 StageDriver 成功事件
+                    emit_progress_event(
+                        &app,
+                        &job_id,
+                        &name,
+                        "driver.stageDriver",
+                        "success",
+                        "驱动包注册成功".to_string(),
+                        None,
+                        None,
+                        Some("stageDriver".to_string()),
+                    );
+                    
                     result
                 }
                 Err(e) => {
                     let evidence = format!("pnputil_stage_failed error=\"{}\"", e);
                     eprintln!("[ModernInf] step=pnputil_stage result=error evidence=\"{}\"", evidence);
+                    
+                    // 发送 StageDriver 失败事件
+                    emit_progress_event(
+                        &app,
+                        &job_id,
+                        &name,
+                        "driver.stageDriver",
+                        "failed",
+                        format!("驱动包注册失败: {}", e),
+                        None,
+                        Some(crate::ErrorPayload {
+                            code: "PNPUTIL_STAGE_FAILED".to_string(),
+                            detail: format!("驱动包注册失败: {}", e),
+                            stdout: None,
+                            stderr: Some(e.clone()),
+                        }),
+                        Some("stageDriver".to_string()),
+                    );
                     
                     if matches!(routing_policy, RoutingPolicy::LegacyFallback) {
                         eprintln!("[RoutingDecision] fallback_to_legacy reason=pnputil_stage_failed error=\"{}\"", e);
@@ -2841,6 +4035,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     } else {
                         return Ok(InstallResult {
@@ -2849,6 +4045,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     }
                 }
@@ -2870,6 +4068,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     } else {
                         return Ok(InstallResult {
@@ -2878,6 +4078,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     }
                 }
@@ -2887,9 +4089,35 @@ pub async fn install_printer_windows(
             eprintln!("[ModernInf] step=register_driver inputs=driver_name=\"{}\" published_inf_path=\"{}\"", 
                 driver_name, published_inf_path);
             
+            // 发送 RegisterDriver 开始事件
+            emit_progress_event(
+                &app,
+                &job_id,
+                &name,
+                "driver.registerDriver",
+                "running",
+                "正在注册打印机驱动".to_string(),
+                None,
+                None,
+                Some("registerDriver".to_string()),
+            );
+            
             match register_printer_driver(&driver_name, &published_inf_path, dry_run) {
                 Ok(()) => {
                     eprintln!("[ModernInf] step=register_driver result=success");
+                    
+                    // 发送 RegisterDriver 成功事件
+                    emit_progress_event(
+                        &app,
+                        &job_id,
+                        &name,
+                        "driver.registerDriver",
+                        "success",
+                        "打印机驱动注册成功".to_string(),
+                        None,
+                        None,
+                        Some("registerDriver".to_string()),
+                    );
                 }
                 Err(e) => {
                     let evidence = format!("register_driver_failed error=\"{}\"", e);
@@ -2903,6 +4131,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     } else {
                         return Ok(InstallResult {
@@ -2911,6 +4141,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     }
                 }
@@ -2928,6 +4160,8 @@ pub async fn install_printer_windows(
                         method: Some("ModernInf".to_string()),
                         stdout: Some(stage_result.output_text),
                         stderr: Some(evidence),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
                     });
                 }
             };
@@ -2939,9 +4173,36 @@ pub async fn install_printer_windows(
                     let windows_build = get_windows_build_number().unwrap_or(0);
                     let is_legacy = windows_build > 0 && windows_build < 10240;
                     
-                    let port_name = match ensure_printer_port(&host, 9100, is_legacy) {
+                    // 发送 EnsurePort 开始事件
+                    emit_progress_event(
+                        &app,
+                        &job_id,
+                        &name,
+                        "device.ensurePort",
+                        "running",
+                        format!("正在创建端口: {}", host),
+                        None,
+                        None,
+                        Some("ensurePort".to_string()),
+                    );
+                    
+                    let port_name = match ensure_printer_port(&host, 9100, is_legacy, &job_id) {
                         Ok(port) => {
                             eprintln!("[ModernInf] step=ensure_port result=success port_name=\"{}\"", port);
+                            
+                            // 发送 EnsurePort 成功事件
+                            emit_progress_event(
+                                &app,
+                                &job_id,
+                                &name,
+                                "device.ensurePort",
+                                "success",
+                                format!("端口创建成功: {}", port),
+                                None,
+                                None,
+                                Some("ensurePort".to_string()),
+                            );
+                            
                             port
                         }
                         Err(e) => {
@@ -2956,6 +4217,8 @@ pub async fn install_printer_windows(
                                     method: Some("ModernInf".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: Some(evidence),
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 });
                             } else {
                                 return Ok(InstallResult {
@@ -2964,6 +4227,8 @@ pub async fn install_printer_windows(
                                     method: Some("ModernInf".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: Some(evidence),
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 });
                             }
                         }
@@ -2972,9 +4237,54 @@ pub async fn install_printer_windows(
                     eprintln!("[ModernInf] step=ensure_queue inputs=queue_name=\"{}\" driver_name=\"{}\" port_name=\"{}\"", 
                         name, driver_name, port_name);
                     
+                    // 发送 EnsureQueue 开始事件
+                    emit_progress_event(
+                        &app,
+                        &job_id,
+                        &name,
+                        "device.ensureQueue",
+                        "running",
+                        format!("正在创建打印队列: {}", name),
+                        None,
+                        None,
+                        Some("ensureQueue".to_string()),
+                    );
+                    
                     match ensure_printer_queue(&name, &driver_name, &port_name) {
                         Ok(()) => {
                             eprintln!("[ModernInf] step=ensure_queue result=success");
+                            
+                            // 发送 EnsureQueue 成功事件
+                            emit_progress_event(
+                                &app,
+                                &job_id,
+                                &name,
+                                "device.ensureQueue",
+                                "success",
+                                "打印队列创建成功".to_string(),
+                                None,
+                                None,
+                                Some("ensureQueue".to_string()),
+                            );
+                            
+                            // 发送 FinalVerify 成功事件
+                            emit_progress_event(
+                                &app,
+                                &job_id,
+                                &name,
+                                "device.finalVerify",
+                                "success",
+                                "安装完成".to_string(),
+                                Some(crate::ProgressPayload {
+                                    current: Some(100),
+                                    total: Some(100),
+                                    unit: Some("percent".to_string()),
+                                    percent: Some(100.0),
+                                }),
+                                None,
+                                Some("finalVerify".to_string()),
+                            );
+                            
                             return Ok(InstallResult {
                                 success: true,
                                 message: format!(
@@ -2984,6 +4294,8 @@ pub async fn install_printer_windows(
                                 method: Some("ModernInf".to_string()),
                                 stdout: Some(stage_result.output_text),
                                 stderr: None,
+                                effective_dry_run: dry_run,
+                                job_id: job_id.to_string(),
                             });
                         }
                         Err(e) => {
@@ -2998,6 +4310,8 @@ pub async fn install_printer_windows(
                                     method: Some("ModernInf".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: Some(evidence),
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 });
                             } else {
                                 return Ok(InstallResult {
@@ -3006,6 +4320,8 @@ pub async fn install_printer_windows(
                                     method: Some("ModernInf".to_string()),
                                     stdout: Some(stage_result.output_text),
                                     stderr: Some(evidence),
+                                    effective_dry_run: dry_run,
+                                    job_id: job_id.to_string(),
                                 });
                             }
                         }
@@ -3026,6 +4342,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: Some(evidence),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     }
                     
@@ -3056,6 +4374,8 @@ pub async fn install_printer_windows(
                             method: Some("ModernInf".to_string()),
                             stdout: Some(stage_result.output_text),
                             stderr: None,
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
                         });
                     } else {
                         let add_shared_script = format!(
@@ -3080,6 +4400,8 @@ pub async fn install_printer_windows(
                                         method: Some("ModernInf".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: None,
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     });
                                 } else {
                                     let evidence = format!("add_shared_failed exit_code={:?} stdout=\"{}\" stderr=\"{}\"", 
@@ -3094,6 +4416,8 @@ pub async fn install_printer_windows(
                                             method: Some("ModernInf".to_string()),
                                             stdout: Some(stage_result.output_text),
                                             stderr: Some(evidence),
+                                            effective_dry_run: dry_run,
+                                            job_id: job_id.to_string(),
                                         });
                                     } else {
                                         return Ok(InstallResult {
@@ -3102,6 +4426,8 @@ pub async fn install_printer_windows(
                                             method: Some("ModernInf".to_string()),
                                             stdout: Some(stage_result.output_text),
                                             stderr: Some(evidence),
+                                            effective_dry_run: dry_run,
+                                            job_id: job_id.to_string(),
                                         });
                                     }
                                 }
@@ -3118,6 +4444,8 @@ pub async fn install_printer_windows(
                                         method: Some("ModernInf".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: Some(evidence),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     });
                                 } else {
                                     return Ok(InstallResult {
@@ -3126,6 +4454,8 @@ pub async fn install_printer_windows(
                                         method: Some("ModernInf".to_string()),
                                         stdout: Some(stage_result.output_text),
                                         stderr: Some(evidence),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
                                     });
                                 }
                             }
@@ -3136,18 +4466,20 @@ pub async fn install_printer_windows(
         } else {
             // 缺失 driver_name：禁止"无 driver_name 就 printui"这种隐性兜底
             let evidence = format!("MissingDriverNameMapping driverPath={:?} has_driver_names={} has_model={}", 
-                driverPath.as_ref().map(|p| p.as_str()), has_driver_names, has_model);
+                resolved_driver_path.as_ref().map(|p| p.as_str()), has_driver_names, has_model);
             eprintln!("[RoutingDecision] selected_path=error reason=MissingDriverNameMapping evidence=\"{}\"", evidence);
             
             return Ok(InstallResult {
                 success: false,
                 message: format!(
                     "缺失 driver_name 映射。Modern 链路需要 driver_name 才能执行。\n\n请在 printer_config.json 中补齐以下字段之一：\n- driver_names: [\"驱动名称\"]\n- model: \"型号\"（用于从 INF 中匹配 driver_name）\n\n当前配置：driverPath={:?}, driver_names={}, model={}\n\nEvidence: {}",
-                    driverPath.as_ref().map(|p| p.as_str()), has_driver_names, has_model, evidence
+                    resolved_driver_path.as_ref().map(|p| p.as_str()), has_driver_names, has_model, evidence
                 ),
                 method: Some("ModernInf".to_string()),
                 stdout: None,
                 stderr: Some(evidence),
+                effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
             });
         }
     }
@@ -3158,7 +4490,7 @@ pub async fn install_printer_windows(
     } else {
         // modern_preferred 或 modern_only：不允许 fallback 到 PrintUIEntry
         let evidence = format!("NoModernPathAvailable routing_policy={:?} has_driver_package={} has_driver_path={}", 
-            routing_policy, has_driver_package, has_driver_path);
+            routing_policy, has_driver_package, resolved_driver_path.is_some());
         eprintln!("[RoutingDecision] selected_path=error reason=NoModernPathAvailable evidence=\"{}\"", evidence);
         
         return Ok(InstallResult {
@@ -3170,6 +4502,8 @@ pub async fn install_printer_windows(
             method: Some("Routing".to_string()),
             stdout: None,
             stderr: Some(evidence),
+            effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
         });
     }
     
@@ -3180,127 +4514,48 @@ pub async fn install_printer_windows(
     let policy = DriverInstallPolicy::from_str(driverInstallPolicy.as_deref());
     eprintln!("[INFO] 驱动安装策略: {:?}", policy);
     
-    // 步骤0：从配置文件中查找匹配的 printer item，提取 driver_names（避免生命周期问题）
-    let driver_names_option = match crate::load_local_config() {
-        Ok((config, _)) => {
-            // 在所有 areas 中查找匹配的 printer item（通过 name 或 path 匹配）
-            let mut matched_driver_names: Option<Vec<String>> = None;
-            for area in &config.areas {
-                for printer in &area.printers {
-                    if printer.name == name || printer.path == path {
-                        // 提取 driver_names 的副本，避免生命周期问题
-                        matched_driver_names = printer.driver_names.clone();
-                        break;
-                    }
-                }
-                if matched_driver_names.is_some() {
-                    break;
-                }
-            }
-            matched_driver_names
-        }
-        Err(e) => {
-            // 配置文件加载失败，不进行校验（保持向后兼容，允许通过其他方式安装）
-            eprintln!("[WARN] 无法加载配置文件: {}，跳过配置校验", e);
-            None
-        }
+    // 使用 effective_* 字段（resolved_driver_names 和 resolved_driver_path）
+    let driver_names_option = if !resolved_driver_names.is_empty() {
+        Some(resolved_driver_names.clone())
+    } else {
+        None
     };
     
     // 步骤0.5：检查是否使用 PrintUIEntry /if 路径
     // 当 driver_path 和 model 都存在时，使用 PrintUIEntry /if 安装（同时导入驱动并创建打印机）
-    if let Some(driver_path_str) = &driverPath {
-        if !driver_path_str.trim().is_empty() {
-            if let Some(model_str) = &model {
-                if !model_str.trim().is_empty() {
-                    // 使用 PrintUIEntry /if 路径
-                    eprintln!("[INFO] 检测到 driver_path 和 model，使用 PrintUIEntry /if 安装路径");
-                    
-                    // 解析 driver_path（相对于应用目录）
-                    let inf_path = match resolve_driver_path(driver_path_str) {
-                        Ok(path) => path,
-                        Err(e) => {
-                            return Ok(InstallResult {
-                                success: false,
-                                message: e.to_user_message(),
-                                method: Some("PrintUIEntry".to_string()),
-                                stdout: None,
-                                stderr: e.format_stderr_with_code(None),
-                            });
-                        }
-                    };
-                    
-                    // 从路径中提取 IP 地址（格式：\\192.168.x.x）
-                    let ip_address = path.trim_start_matches("\\\\").to_string();
-                    
-                    // 端口名格式：IP_IP地址（用下划线替换点）
-                    let port_name = format!("IP_{}", ip_address.replace(".", "_"));
-                    
-                    // 检测 Windows 构建号来判断是否支持 Add-PrinterPort
-                    let windows_build = get_windows_build_number().unwrap_or(0);
-                    let use_modern_method = if windows_build == 0 {
-                        eprintln!("[DEBUG] 构建号检测失败，默认使用现代方法（Add-PrinterPort）");
-                        true
-                    } else {
-                        windows_build >= 10240
-                    };
-                    
-                    eprintln!("[DEBUG] Windows 构建号: {}, 使用现代方法: {}", windows_build, use_modern_method);
-                    
-                    // 检查旧打印机是否存在（不再删除）
-                    if check_existing_printer(&name) {
-                        eprintln!("[DEBUG] 检测到同名打印机已存在: {}", name);
-                        // 不删除，继续尝试安装（系统可能会提示已存在）
-                    }
-                    
-                    // 创建端口
-                    if use_modern_method {
-                        // Windows 10+ 使用 Add-PrinterPort
-                        match add_printer_port_modern(&port_name, &ip_address) {
-                            Err(e) => {
-                                let (stdout, stderr) = e.get_output();
-                                return Ok(InstallResult {
-                                    success: false,
-                                    message: e.to_user_message(),
-                                    method: Some("PrintUIEntry".to_string()),
-                                    stdout,
-                                    stderr: e.format_stderr_with_code(stderr),
-                                });
-                            }
-                            Ok(_) => {
-                                eprintln!("[DEBUG] 端口创建成功，继续使用 PrintUIEntry 安装打印机");
-                            }
-                        }
-                    } else {
-                        // Windows 7/8 使用 VBS 脚本
-                        let script_path = write_vbs_script_to_temp()
-                            .map_err(|e| e.to_user_message())?;
-                        
-                        match add_printer_port_vbs(&script_path, &port_name, &ip_address) {
-                            Err(result) => return Ok(result),
-                            Ok(_) => {
-                                eprintln!("[DEBUG] 端口创建成功（VBS），继续使用 PrintUIEntry 安装打印机");
-                            }
-                        }
-                    }
-                    
-                    // 使用 PrintUIEntry /if 安装打印机（同时导入驱动）
-                    match install_printer_with_printui(&name, &inf_path, &port_name, model_str) {
-                        Ok(result) => {
-                            // 安装成功后写入 ePrinty tag
-                            if result.success {
-                                let stable_id = generate_stable_id(&name, &path);
-                                match write_eprinty_tag_after_install(&name, &stable_id, &path) {
-                                    Ok(_) => {
-                                        eprintln!("[INFO] ePrinty tag 写入成功: name={}, stable_id={}", name, stable_id);
-                                    }
-                                    Err(err) => {
-                                        eprintln!("[WARN] ePrinty tag 写入失败（不影响安装成功）: {}", err);
-                                        super::log::write_log(&format!("[Install] TAG_WRITE_FAIL name={} error={}", name, err));
-                                    }
-                                }
-                            }
-                            return Ok(result);
-                        }
+    if let Some(inf_path) = &inf_abs_path {
+        if let Some(model_str) = &model {
+            if !model_str.trim().is_empty() {
+                // 使用 PrintUIEntry /if 路径
+                eprintln!("[INFO] 检测到 driver_path 和 model，使用 PrintUIEntry /if 安装路径");
+                
+                // 从路径中提取 IP 地址（格式：\\192.168.x.x）
+                let ip_address = path.trim_start_matches("\\\\").to_string();
+                
+                // 端口名格式：IP_IP地址（用下划线替换点）
+                let port_name = format!("IP_{}", ip_address.replace(".", "_"));
+                
+                // 检测 Windows 构建号来判断是否支持 Add-PrinterPort
+                let windows_build = get_windows_build_number().unwrap_or(0);
+                let use_modern_method = if windows_build == 0 {
+                    eprintln!("[DEBUG] 构建号检测失败，默认使用现代方法（Add-PrinterPort）");
+                    true
+                } else {
+                    windows_build >= 10240
+                };
+                
+                eprintln!("[DEBUG] Windows 构建号: {}, 使用现代方法: {}", windows_build, use_modern_method);
+                
+                // 检查旧打印机是否存在（不再删除）
+                if check_existing_printer(&name) {
+                    eprintln!("[DEBUG] 检测到同名打印机已存在: {}", name);
+                    // 不删除，继续尝试安装（系统可能会提示已存在）
+                }
+                
+                // 创建端口
+                if use_modern_method {
+                    // Windows 10+ 使用 Add-PrinterPort
+                    match add_printer_port_modern(&port_name, &ip_address) {
                         Err(e) => {
                             let (stdout, stderr) = e.get_output();
                             return Ok(InstallResult {
@@ -3309,12 +4564,83 @@ pub async fn install_printer_windows(
                                 method: Some("PrintUIEntry".to_string()),
                                 stdout,
                                 stderr: e.format_stderr_with_code(stderr),
+                                effective_dry_run: dry_run,
+                                job_id: job_id.to_string(),
                             });
+                        }
+                        Ok(_) => {
+                            eprintln!("[DEBUG] 端口创建成功，继续使用 PrintUIEntry 安装打印机");
+                        }
+                    }
+                } else {
+                    // Windows 7/8 使用 VBS 脚本
+                    let script_path = write_vbs_script_to_temp()
+                        .map_err(|e| e.to_user_message())?;
+                    
+                    match add_printer_port_vbs(&script_path, &port_name, &ip_address, &job_id) {
+                        Err(result) => return Ok(result),
+                        Ok(_) => {
+                            eprintln!("[DEBUG] 端口创建成功（VBS），继续使用 PrintUIEntry 安装打印机");
                         }
                     }
                 }
+                
+                // 使用 PrintUIEntry /if 安装打印机（同时导入驱动）
+                match install_printer_with_printui(&name, &inf_path, &port_name, model_str, &job_id) {
+                    Ok(result) => {
+                        // 安装成功后写入 ePrinty tag
+                        if result.success {
+                            // 发送 FinalVerify 成功事件
+                            emit_final_verify_if_needed(
+                                &app,
+                                &job_id,
+                                &name,
+                                true,
+                                Some("安装完成".to_string()),
+                            );
+                            
+                            let stable_id = generate_stable_id(&name, &path);
+                            match write_eprinty_tag_after_install(&name, &stable_id, &path) {
+                                Ok(_) => {
+                                    eprintln!("[INFO] ePrinty tag 写入成功: name={}, stable_id={}", name, stable_id);
+                                }
+                                Err(err) => {
+                                    eprintln!("[WARN] ePrinty tag 写入失败（不影响安装成功）: {}", err);
+                                    super::log::write_log(&format!("[Install] TAG_WRITE_FAIL name={} error={}", name, err));
+                                }
+                            }
+                        }
+                        return Ok(result);
+                    }
+                    Err(e) => {
+                        let (stdout, stderr) = e.get_output();
+                        return Ok(InstallResult {
+                            success: false,
+                            message: e.to_user_message(),
+                            method: Some("PrintUIEntry".to_string()),
+                            stdout,
+                            stderr: e.format_stderr_with_code(stderr),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
+                        });
+                    }
+                }
+            } else {
+                // model 存在但为空字符串
+                let error = InstallError::InvalidConfig {
+                    reason: "driver_path 需要同时提供非空的 model 才能使用 PrintUIEntry /if 安装。请更新 printer_config.json 添加 model 字段。".to_string(),
+                };
+                return Ok(InstallResult {
+                    success: false,
+                    message: error.to_user_message(),
+                    method: Some("PrintUIEntry".to_string()),
+                    stdout: None,
+                    stderr: error.format_stderr_with_code(None),
+                    effective_dry_run: dry_run,
+                    job_id: job_id.to_string(),
+                });
             }
-            
+        } else {
             // driver_path 存在但 model 缺失
             let error = InstallError::InvalidConfig {
                 reason: "driver_path 需要同时提供 model 才能使用 PrintUIEntry /if 安装。请更新 printer_config.json 添加 model 字段。".to_string(),
@@ -3325,6 +4651,8 @@ pub async fn install_printer_windows(
                 method: Some("PrintUIEntry".to_string()),
                 stdout: None,
                 stderr: error.format_stderr_with_code(None),
+                effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
             });
         }
     }
@@ -3335,56 +4663,42 @@ pub async fn install_printer_windows(
     // 注意：当 resolved_mode == "package" 时，已经在上面分流到 Package 分支，不会执行到这里
     // 这里保留原有的逻辑用于其他模式（legacy）
     
-    if let Some(driver_path_str) = &driverPath {
-        if !driver_path_str.trim().is_empty() {
-            match policy {
-                DriverInstallPolicy::Always => {
-                    // 策略：总是安装 INF 驱动
-                    eprintln!("[DEBUG] 策略: Always - 检测到 driver_path: {}，开始安装 INF 驱动", driver_path_str);
-                    
-                    // 解析 driver_path（相对于应用目录）
-                    let inf_path = match resolve_driver_path(driver_path_str) {
-                        Ok(path) => path,
-                        Err(e) => {
-                            return Ok(InstallResult {
-                                success: false,
-                                message: e.to_user_message(),
-                                method: Some("install_inf_driver".to_string()),
-                                stdout: None,
-                                stderr: e.format_stderr_with_code(None),
-                            });
-                        }
-                    };
-                    
-                    // 安装 INF 驱动
-                    // 需要 driver_names 用于验证安装是否成功
-                    let driver_names_for_install = driver_names_option.as_ref()
-                        .map(|names| names.as_slice())
-                        .unwrap_or(&[]);
-                    
-                    match install_inf_driver(&inf_path, driver_names_for_install) {
-                        Ok(()) => {
-                            eprintln!("[DEBUG] INF 驱动安装成功");
-                            inf_installed = true;
-                        }
-                        Err(e) => {
-                            // INF 安装失败，直接终止安装流程
-                            let (stdout, stderr) = e.get_output();
-                            return Ok(InstallResult {
-                                success: false,
-                                message: e.to_user_message(),
-                                method: Some("install_inf_driver".to_string()),
-                                stdout,
-                                stderr: e.format_stderr_with_code(stderr),
-                            });
-                        }
+    if let Some(inf_path) = &inf_abs_path {
+        match policy {
+            DriverInstallPolicy::Always => {
+                // 策略：总是安装 INF 驱动
+                eprintln!("[DEBUG] 策略: Always - 检测到 inf_abs_path: {}，开始安装 INF 驱动", inf_path.display());
+                
+                // 安装 INF 驱动
+                // 需要 driver_names 用于验证安装是否成功
+                let driver_names_for_install = driver_names_option.as_ref()
+                    .map(|names| names.as_slice())
+                    .unwrap_or(&[]);
+                
+                match install_inf_driver(&inf_path, driver_names_for_install) {
+                    Ok(()) => {
+                        eprintln!("[DEBUG] INF 驱动安装成功");
+                        inf_installed = true;
+                    }
+                    Err(e) => {
+                        // INF 安装失败，直接终止安装流程
+                        let (stdout, stderr) = e.get_output();
+                        return Ok(InstallResult {
+                            success: false,
+                            message: e.to_user_message(),
+                            method: Some("install_inf_driver".to_string()),
+                            stdout,
+                            stderr: e.format_stderr_with_code(stderr),
+                            effective_dry_run: dry_run,
+                            job_id: job_id.to_string(),
+                        });
                     }
                 }
-                DriverInstallPolicy::ReuseIfInstalled => {
-                    // 策略：先尝试选择已安装的驱动，如果找不到再安装 INF
-                    eprintln!("[DEBUG] 策略: ReuseIfInstalled - 先尝试选择已安装的驱动");
-                    // 这一步将在步骤2中执行
-                }
+            }
+            DriverInstallPolicy::ReuseIfInstalled => {
+                // 策略：先尝试选择已安装的驱动，如果找不到再安装 INF
+                eprintln!("[DEBUG] 策略: ReuseIfInstalled - 先尝试选择已安装的驱动");
+                // 这一步将在步骤2中执行
             }
         }
     }
@@ -3404,6 +4718,8 @@ pub async fn install_printer_windows(
                     method: None,
                     stdout: None,
                     stderr: error.format_stderr_with_code(None),
+                    effective_dry_run: dry_run,
+                    job_id: job_id.to_string(),
                 });
             }
             // 检查数组中的元素是否全部为空白（trim 后为空）
@@ -3418,6 +4734,8 @@ pub async fn install_printer_windows(
                     method: None,
                     stdout: None,
                     stderr: error.format_stderr_with_code(None),
+                    effective_dry_run: dry_run,
+                    job_id: job_id.to_string(),
                 });
             }
             
@@ -3433,86 +4751,60 @@ pub async fn install_printer_windows(
                 Err((e, ps_stderr)) => {
                     // 如果策略是 ReuseIfInstalled 且未找到驱动，尝试安装 INF 后再选择
                     if matches!(policy, DriverInstallPolicy::ReuseIfInstalled) && !inf_installed {
-                        if let Some(driver_path_str) = &driverPath {
-                            if !driver_path_str.trim().is_empty() {
-                                eprintln!("[INFO] 策略: ReuseIfInstalled - 未找到已安装的驱动，开始安装 INF 驱动");
-                                
-                                // 解析 driver_path（相对于应用目录）
-                                let inf_path = match resolve_driver_path(driver_path_str) {
-                                    Ok(path) => path,
-                                    Err(e) => {
-                                        // INF 路径解析失败，返回错误
-                                        let mut stderr_parts = Vec::new();
-                                        let error_code_msg = e.format_stderr_with_code(None).unwrap_or_default();
-                                        if !error_code_msg.is_empty() {
-                                            stderr_parts.push(error_code_msg);
+                        if let Some(inf_path) = &inf_abs_path {
+                            eprintln!("[INFO] 策略: ReuseIfInstalled - 未找到已安装的驱动，开始安装 INF 驱动");
+                            
+                            // 安装 INF 驱动
+                            // install_inf_driver 内部已经验证了 driver_names，如果成功则说明驱动已注册
+                            match install_inf_driver(&inf_path, &names) {
+                                Ok(()) => {
+                                    eprintln!("[DEBUG] INF 驱动安装成功");
+                                    inf_installed = true;
+                                    
+                                    // install_inf_driver 内部已经验证了 driver_names，再次选择确认
+                                    match select_installed_driver_name(&names) {
+                                        Ok(driver_name) => {
+                                            eprintln!("[INFO] INF 安装后找到驱动: {}", driver_name);
+                                            // 继续流程，使用找到的驱动
+                                            Ok(driver_name)
                                         }
-                                        let candidates_str = names.join(",");
-                                        stderr_parts.push(format!("Candidates: {}", candidates_str));
-                                        let stderr_msg = stderr_parts.join(" | ");
-                                        
-                                        return Ok(InstallResult {
-                                            success: false,
-                                            message: e.to_user_message(),
-                                            method: None,
-                                            stdout: None,
-                                            stderr: Some(stderr_msg),
-                                        });
-                                    }
-                                };
-                                
-                                // 安装 INF 驱动
-                                // install_inf_driver 内部已经验证了 driver_names，如果成功则说明驱动已注册
-                                match install_inf_driver(&inf_path, &names) {
-                                    Ok(()) => {
-                                        eprintln!("[DEBUG] INF 驱动安装成功");
-                                        inf_installed = true;
-                                        
-                                        // install_inf_driver 内部已经验证了 driver_names，再次选择确认
-                                        match select_installed_driver_name(&names) {
-                                            Ok(driver_name) => {
-                                                eprintln!("[INFO] INF 安装后找到驱动: {}", driver_name);
-                                                // 继续流程，使用找到的驱动
-                                                Ok(driver_name)
-                                            }
-                                            Err((e2, ps_stderr2)) => {
-                                                // 理论上不应该到这里，因为 install_inf_driver 已经验证过了
-                                                // 但为了安全起见，仍然返回错误
-                                                Err((e2, ps_stderr2))
-                                            }
+                                        Err((e2, ps_stderr2)) => {
+                                            // 理论上不应该到这里，因为 install_inf_driver 已经验证过了
+                                            // 但为了安全起见，仍然返回错误
+                                            Err((e2, ps_stderr2))
                                         }
-                                    }
-                                    Err(e) => {
-                                        // INF 安装失败，返回错误
-                                        let (stdout, stderr) = e.get_output();
-                                        let mut stderr_parts = Vec::new();
-                                        
-                                        // 添加错误码前缀的 stderr
-                                        let error_stderr = e.format_stderr_with_code(stderr).unwrap_or_default();
-                                        if !error_stderr.is_empty() {
-                                            stderr_parts.push(error_stderr);
-                                        }
-                                        
-                                        let candidates_str = names.join(",");
-                                        stderr_parts.push(format!("Candidates: {}", candidates_str));
-                                        if let Some(ps_err) = ps_stderr {
-                                            if !ps_err.trim().is_empty() {
-                                                stderr_parts.push(format!("PowerShell stderr: {}", ps_err));
-                                            }
-                                        }
-                                        let stderr_msg = stderr_parts.join(" | ");
-                                        
-                                        return Ok(InstallResult {
-                                            success: false,
-                                            message: e.to_user_message(),
-                                            method: Some("install_inf_driver".to_string()),
-                                            stdout,
-                                            stderr: Some(stderr_msg),
-                                        });
                                     }
                                 }
-                            } else {
-                                Err((e, ps_stderr))
+                                Err(e) => {
+                                    // INF 安装失败，返回错误
+                                    let (stdout, stderr) = e.get_output();
+                                    let mut stderr_parts = Vec::new();
+                                    
+                                    // 添加错误码前缀的 stderr
+                                    let error_stderr = e.format_stderr_with_code(stderr).unwrap_or_default();
+                                    if !error_stderr.is_empty() {
+                                        stderr_parts.push(error_stderr);
+                                    }
+                                    
+                                    let candidates_str = names.join(",");
+                                    stderr_parts.push(format!("Candidates: {}", candidates_str));
+                                    if let Some(ps_err) = ps_stderr {
+                                        if !ps_err.trim().is_empty() {
+                                            stderr_parts.push(format!("PowerShell stderr: {}", ps_err));
+                                        }
+                                    }
+                                    let stderr_msg = stderr_parts.join(" | ");
+                                    
+                                    return Ok(InstallResult {
+                                        success: false,
+                                        message: e.to_user_message(),
+                                        method: Some("install_inf_driver".to_string()),
+                                        stdout,
+                                        stderr: Some(stderr_msg),
+                                        effective_dry_run: dry_run,
+                                        job_id: job_id.to_string(),
+                                    });
+                                }
                             }
                         } else {
                             Err((e, ps_stderr))
@@ -3560,6 +4852,8 @@ pub async fn install_printer_windows(
                         method: None,
                         stdout: None,
                         stderr: Some(stderr_msg),
+                        effective_dry_run: dry_run,
+                        job_id: job_id.to_string(),
                     });
                 }
             }
@@ -3623,6 +4917,8 @@ pub async fn install_printer_windows(
                     method: Some("Add-Printer".to_string()),
                     stdout,
                     stderr: e.format_stderr_with_code(stderr),
+                    effective_dry_run: false, // 这是真实安装路径
+                    job_id: job_id.to_string(),
                 });
             }
             Ok(outcome) => {
@@ -3638,10 +4934,19 @@ pub async fn install_printer_windows(
         }
         
         // 步骤2：使用选中的驱动添加打印机
-        let result = add_printer_with_driver_modern(&name, &port_name, &ip_address, &selected_driver);
+        let result = add_printer_with_driver_modern(&name, &port_name, &ip_address, &selected_driver, &job_id);
         
-        // 如果安装成功，写入 ePrinty tag
+        // 如果安装成功，写入 ePrinty tag 并发送 finalVerify
         if result.success {
+            // 发送 FinalVerify 成功事件
+            emit_final_verify_if_needed(
+                &app,
+                &job_id,
+                &name,
+                true,
+                Some("安装完成".to_string()),
+            );
+            
             let stable_id = generate_stable_id(&name, &path);
             match write_eprinty_tag_after_install(&name, &stable_id, &path) {
                 Ok(_) => {
@@ -3663,14 +4968,23 @@ pub async fn install_printer_windows(
             .map_err(|e| e.to_user_message())?;
         
         // 步骤2：使用 cscript 运行 prnport.vbs 脚本添加端口
-        match add_printer_port_vbs(&script_path, &port_name, &ip_address) {
+        match add_printer_port_vbs(&script_path, &port_name, &ip_address, &job_id) {
             Err(result) => Ok(result),
             Ok(_) => {
                 // 步骤3：端口添加成功，现在使用 PowerShell Add-Printer 安装打印机
-                let result = add_printer_with_driver_vbs(&name, &port_name, &ip_address, &selected_driver);
+                let result = add_printer_with_driver_vbs(&name, &port_name, &ip_address, &selected_driver, &job_id);
                 
-                // 如果安装成功，写入 ePrinty tag
+                // 如果安装成功，写入 ePrinty tag 并发送 finalVerify
                 if result.success {
+                    // 发送 FinalVerify 成功事件
+                    emit_final_verify_if_needed(
+                        &app,
+                        &job_id,
+                        &name,
+                        true,
+                        Some("安装完成".to_string()),
+                    );
+                    
                     let stable_id = generate_stable_id(&name, &path);
                     match write_eprinty_tag_after_install(&name, &stable_id, &path) {
                         Ok(_) => {

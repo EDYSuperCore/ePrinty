@@ -610,12 +610,16 @@ version = "1.4.1"
 dependencies = [
  "chrono",
  "encoding_rs",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tokio",
+ "url",
+ "walkdir",
  "winapi",
  "windows 0.52.0",
 ]

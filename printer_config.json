@@ -1,98 +1,153 @@
 {
-  "version": "1.2.0",
-  "areas": [
-    {
-      "name": "北京易点云大厦A座一楼",
-      "printers": [
-        {
-          "name": "大厦A座一楼 前台",
-          "path": "\\\\192.168.20.11",
-          "model": "HP LaserJet MFP M227fdw",
-          "driver_names": ["HP LaserJet MFP M227-M231 PCL-6 (V4)"],
-          "driver_path": "drivers/HP 227/hpsw642a4_x64.inf",
-          "install_mode": "package"
-        },
-        {
-          "name": "大厦A座一楼 前台彩色打印",
-          "path": "\\\\192.168.20.65",
-          "model": "HP LaserJet MFP M154nw",
-          "driver_names": ["HP ColorLaserJet M153-M154 PCL 6 (V3)"],
-          "driver_path": "drivers/M154nw/hpniae2a_x64.inf",
-          "install_mode": "package"
-        },
-        {
-          "name": "大厦A座一楼 财务",
-          "path": "\\\\192.168.20.15",
-          "model": "HP LaserJet MFP M233sdw",
-          "driver_names": ["HP LaserJet MFP M232-M237 PCLmS"],
-          "driver_path": "drivers/HP 233/Driver/hpypclms32.inf",
-          "install_mode": "package"
-        },
-        {
-          "name": "大厦A座一楼 SSC打印机",
-          "path": "\\\\192.168.14.32",
-          "model": "HP LaserJet MFP M227fdw",
-          "driver_names": ["HP LaserJet MFP M227-M231 PCL-6 (V4)"],
-          "driver_path": "drivers/HP 227/hpsw642a4_x64.inf",
-          "install_mode": "package"
-        },
-        {
-          "name": "大厦A座一楼 财务大打印机",
-          "path": "\\\\192.168.20.35",
-          "model": "HP LaserJet 700 color MFP M775",
-          "driver_names": ["HP LaserJet 700 color MFP M775 PCL 6"],
-          "driver_path": "drivers/M775/hpcm775c.inf",
-          "install_mode": "package"
-        },
-        {
-          "name": "大厦A座一楼 客户服务中心",
-          "path": "\\\\192.168.14.30",
-          "model": "HP LaserJet MFP M128fw",
-          "driver_names": ["HP LaserJet Pro MFP M127-M128 PCLmS"],
-          "driver_path": "drivers/M128/hppasc_lj127128.inf",
-          "install_mode": "package"
-        }
-      ]
+  "version": "2.0.0",
+  "driverCatalog": {
+    "HP_M227_WIN_X64": {
+      "displayName": "HP LaserJet MFP M227-M231 PCL-6 (V4)",
+      "vendor": "HP",
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/HP 227/hpsw642a4_x64.inf",
+        "driverNames": ["HP LaserJet MFP M227-M231 PCL-6 (V4)"]
+      },
+      "notes": "HP M227 series driver - used by 3 printers in Beijing office"
     },
-    {
-      "name": "北京易点云大厦A座二楼",
-      "printers": [
-        {
-          "name": "大厦A座二楼 销售",
-          "path": "\\\\192.168.63.7",
-          "model": "HP LaserJet MFP M233sdw",
-          "driver_names": ["HP LaserJet MFP M232-M237 PCLmS"],
-          "driver_path": "drivers/HP 233/Driver/hpypclms32.inf",
-          "install_mode": "package"
-        }
-      ]
+    "HP_M154_WIN_X64": {
+      "displayName": "HP ColorLaserJet M153-M154 PCL 6 (V3)",
+      "vendor": "HP",
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/M154nw/hpniae2a_x64.inf",
+        "driverNames": ["HP ColorLaserJet M153-M154 PCL 6 (V3)"]
+      },
+      "notes": "HP M154 color printer driver"
     },
-    {
-      "name": "北京易点云大厦A座三楼",
-      "printers": [
-        {
-          "name": "大厦A座三楼 打印机",
-          "path": "\\\\192.168.86.2",
-          "model": "HP LaserJet MFP M227fdw",
-          "driver_names": ["HP LaserJet MFP M227-M231 PCL-6 (V4)"],
-          "driver_path": "drivers/HP 227/hpsw642a4_x64.inf",
-          "install_mode": "package"
-        }
-      ]
+    "HP_M233_WIN_X64": {
+      "displayName": "HP LaserJet MFP M232-M237 PCLmS",
+      "vendor": "HP",
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/HP 233/Driver/hpypclms32.inf",
+        "driverNames": ["HP LaserJet MFP M232-M237 PCLmS"]
+      },
+      "notes": "HP M233 series driver - used by 2 printers"
     },
+    "HP_M775_WIN_X64": {
+      "displayName": "HP LaserJet 700 color MFP M775 PCL 6",
+      "vendor": "HP",
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/M775/hpcm775c.inf",
+        "driverNames": ["HP LaserJet 700 color MFP M775 PCL 6"]
+      },
+      "notes": "HP M775 color MFP driver"
+    },
+    "HP_M128_WIN_X64": {
+      "displayName": "HP LaserJet Pro MFP M127-M128 PCLmS",
+      "vendor": "HP",
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/M128/hppasc_lj127128.inf",
+        "driverNames": ["HP LaserJet Pro MFP M127-M128 PCLmS"]
+      },
+      "notes": "HP M128 series driver"
+    },
+    "EPSON_WFC5790_WIN_X64": {
+      "displayName": "EPSON WF-C5790",
+      "vendor": "EPSON",
+      "installMode": "package",
+      "local": {
+        "infRel": "WFC5790_x64_2120W/WINX64/E_WF1SGE.INF",
+        "driverNames": ["EPSON WF-C5790 Series"]
+      },
+      "remote": {
+        "url": "http://192.168.2.200:8080/WFC5790_x64_2120W.zip",
+        "sha256": "32C9A770396EC36F71DDBEAF2EAB6514C8BD72B82C44E23A72E0B0E81DA4ED1E",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      },
+      "notes": "EPSON WF-C5790 with remote package support"
+    }
+  },
+  "cities": [
     {
-      "name": "北京易点云大厦B座一楼",
-      "printers": [
+      "cityId": "beijing",
+      "cityName": "北京",
+      "areas": [
         {
-          "name": "大厦B座一楼 打印机",
-          "path": "\\\\192.168.20.5",
-          "model": "EPSON WF-C5790",
-          "driver_names": ["EPSON WF-C5790 Series"],
-          "driver_path": "drivers/WFC5790_x64_2120W/WINX64/E_WF1SGE.INF",
-          "install_mode": "package"
+          "areaName": "易点云大厦A座一楼",
+          "printers": [
+            {
+              "name": "大厦A座一楼 前台",
+              "path": "\\\\192.168.20.11",
+              "model": "HP LaserJet MFP M227fdw",
+              "driverKey": "HP_M227_WIN_X64"
+            },
+            {
+              "name": "大厦A座一楼 前台彩色打印",
+              "path": "\\\\192.168.20.65",
+              "model": "HP LaserJet MFP M154nw",
+              "driverKey": "HP_M154_WIN_X64"
+            },
+            {
+              "name": "大厦A座一楼 财务",
+              "path": "\\\\192.168.20.15",
+              "model": "HP LaserJet MFP M233sdw",
+              "driverKey": "HP_M233_WIN_X64"
+            },
+            {
+              "name": "大厦A座一楼 SSC打印机",
+              "path": "\\\\192.168.14.32",
+              "model": "HP LaserJet MFP M227fdw",
+              "driverKey": "HP_M227_WIN_X64"
+            },
+            {
+              "name": "大厦A座一楼 财务大打印机",
+              "path": "\\\\192.168.20.35",
+              "model": "HP LaserJet 700 color MFP M775",
+              "driverKey": "HP_M775_WIN_X64"
+            },
+            {
+              "name": "大厦A座一楼 客户服务中心",
+              "path": "\\\\192.168.14.30",
+              "model": "HP LaserJet MFP M128fw",
+              "driverKey": "HP_M128_WIN_X64"
+            }
+          ]
+        },
+        {
+          "areaName": "易点云大厦A座二楼",
+          "printers": [
+            {
+              "name": "大厦A座二楼 销售",
+              "path": "\\\\192.168.63.7",
+              "model": "HP LaserJet MFP M233sdw",
+              "driverKey": "HP_M233_WIN_X64"
+            }
+          ]
+        },
+        {
+          "areaName": "易点云大厦A座三楼",
+          "printers": [
+            {
+              "name": "大厦A座三楼 打印机",
+              "path": "\\\\192.168.86.2",
+              "model": "HP LaserJet MFP M227fdw",
+              "driverKey": "HP_M227_WIN_X64"
+            }
+          ]
+        },
+        {
+          "areaName": "易点云大厦B座一楼",
+          "printers": [
+            {
+              "name": "大厦B座一楼 打印机",
+              "path": "\\\\192.168.20.5",
+              "model": "EPSON WF-C5790",
+              "driverKey": "EPSON_WFC5790_WIN_X64"
+            }
+          ]
         }
       ]
     }
   ]
 }
- 

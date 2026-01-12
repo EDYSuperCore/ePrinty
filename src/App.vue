@@ -83,31 +83,62 @@
           </div>
         </div>
 
-        <!-- 办公区列表 -->
-        <div v-else-if="config && config.areas && config.areas.length > 0" class="flex-1 overflow-y-auto">
-          <button
-            v-for="(area, index) in config.areas"
-            :key="area.name"
-            @click="selectArea(index)"
-            :class="[
-              'w-full px-4 py-3 text-left transition-all duration-150 relative group',
-              selectedAreaIndex === index 
-                ? 'bg-gray-100 text-gray-900' 
-                : 'hover:bg-gray-50 text-gray-700'
-            ]"
-          >
-            <div class="flex items-center justify-between">
-              <span class="font-medium text-sm truncate flex-1 min-w-0">{{ area.name }}</span>
-              <span :class="[
-                'flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full transition-all',
-                selectedAreaIndex === index
-                  ? 'bg-gray-700 text-white'
-                  : 'bg-gray-200 text-gray-600'
-              ]">
-                {{ area.printers ? area.printers.length : 0 }}
+        <!-- 办公区列表（二级树形结构：城市 -> 办公区） -->
+        <div v-else-if="config && config.cities && config.cities.length > 0" class="flex-1 overflow-y-auto">
+          <div v-for="(city, cityIndex) in config.cities" :key="city.cityId" class="mb-1">
+            <!-- 城市标题（可展开/折叠） -->
+            <button
+              @click="toggleCity(cityIndex)"
+              class="w-full px-4 py-2.5 text-left transition-all duration-150 flex items-center justify-between hover:bg-gray-50 group"
+            >
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <!-- 展开/折叠图标 -->
+                <svg 
+                  :class="['w-4 h-4 transition-transform duration-200 flex-shrink-0', expandedCities.has(cityIndex) ? 'rotate-90' : '']"
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+                
+                <!-- 城市名称 -->
+                <span class="font-semibold text-sm text-gray-800 truncate">{{ city.cityName }}</span>
+              </div>
+              
+              <!-- 区域数量标签 -->
+              <span class="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 ml-2">
+                {{ city.areas ? city.areas.length : 0 }}
               </span>
+            </button>
+            
+            <!-- 办公区列表（展开时显示） -->
+            <div v-if="expandedCities.has(cityIndex)" class="bg-gray-50">
+              <button
+                v-for="(area, areaIndex) in city.areas"
+                :key="areaIndex"
+                @click="selectArea(cityIndex, areaIndex)"
+                :class="[
+                  'w-full pl-10 pr-4 py-2.5 text-left transition-all duration-150 relative group border-l-2',
+                  selectedCityIndex === cityIndex && selectedAreaIndex === areaIndex
+                    ? 'bg-white border-blue-500 text-gray-900' 
+                    : 'border-transparent hover:bg-white hover:border-gray-300 text-gray-700'
+                ]"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="font-medium text-sm truncate flex-1 min-w-0">{{ area.areaName }}</span>
+                  <span :class="[
+                    'flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full transition-all',
+                    selectedCityIndex === cityIndex && selectedAreaIndex === areaIndex
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-gray-200 text-gray-600'
+                  ]">
+                    {{ area.printers ? area.printers.length : 0 }}
+                  </span>
+                </div>
+              </button>
             </div>
-          </button>
+          </div>
         </div>
 
         <!-- 空状态 -->
@@ -159,7 +190,7 @@
         </div>
 
         <!-- 未选择办公区提示 -->
-        <div v-else-if="selectedAreaIndex === null" class="flex items-center justify-center h-full">
+        <div v-else-if="!selectedArea" class="flex items-center justify-center h-full">
           <div class="text-center max-w-sm">
             <div class="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
               <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -299,6 +330,22 @@
                 </div>
               </button>
               <button
+                @click="settingsTab = 'info'; systemInfoStore.loadOnce()"
+                :class="[
+                  'w-full px-4 py-3 text-left rounded-lg transition-all duration-150',
+                  settingsTab === 'info'
+                    ? 'bg-white text-blue-600 shadow-sm font-medium'
+                    : 'text-gray-700 hover:bg-gray-100'
+                ]"
+              >
+                <div class="flex items-center space-x-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>信息</span>
+                </div>
+              </button>
+              <button
                 @click="settingsTab = 'about'"
                 :class="[
                   'w-full px-4 py-3 text-left rounded-lg transition-all duration-150',
@@ -354,7 +401,7 @@
                 </div>
               </div>
             </div>
-
+            
             <!-- 高级选项 -->
             <div class="space-y-6">
 
@@ -416,41 +463,140 @@
               </div>
             </div>
             </div>
+            
+            <!-- Tab: 信息 -->
+            <div v-if="settingsTab === 'info'" class="p-6">
+              <h4 class="text-base font-semibold text-gray-900 mb-4">系统信息</h4>
+              
+              <!-- 加载状态 -->
+              <div v-if="systemInfoStore.status === 'loading' && !systemInfoStore.info" class="flex items-center justify-center py-12">
+                <div class="text-center">
+                  <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-blue-600 mb-3"></div>
+                  <p class="text-sm text-gray-600">正在获取系统信息...</p>
+                </div>
+              </div>
+              
+              <!-- 错误状态 -->
+              <div v-else-if="systemInfoStore.status === 'error'" class="flex items-center justify-center py-12">
+                <div class="text-center">
+                  <svg class="w-12 h-12 text-red-500 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p class="text-sm text-red-600 mb-3">{{ systemInfoStore.error }}</p>
+                  <button
+                    @click="systemInfoStore.refresh()"
+                    class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    重试
+                  </button>
+                </div>
+              </div>
+              
+              <!-- 系统信息展示 -->
+              <div v-else-if="systemInfoStore.info" class="space-y-3">
+                <!-- 操作系统 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="bg-blue-100 rounded-lg p-2">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs text-gray-500">操作系统</p>
+                        <p class="text-sm font-medium text-gray-900">{{ systemInfoStore.info.osDisplay || systemInfoStore.info.osVersion }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 系统架构 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="bg-green-100 rounded-lg p-2">
+                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs text-gray-500">系统架构</p>
+                        <p class="text-sm font-medium text-gray-900">{{ systemInfoStore.info.arch }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 应用版本 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="bg-purple-100 rounded-lg p-2">
+                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs text-gray-500">应用版本</p>
+                        <p class="text-sm font-medium text-gray-900">v{{ systemInfoStore.info.appVersion }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 平台类型 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="bg-gray-200 rounded-lg p-2">
+                        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs text-gray-500">平台</p>
+                        <p class="text-sm font-medium text-gray-900">{{ systemInfoStore.info.platform }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 空状态（未加载） -->
+              <div v-else class="flex items-center justify-center py-12">
+                <button
+                  @click="systemInfoStore.loadOnce()"
+                  class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  加载系统信息
+                </button>
+              </div>
+            </div>
 
             <!-- Tab 2：关于 -->
             <div v-if="settingsTab === 'about'" class="p-6">
-            
-            <div class="flex items-center space-x-4 mb-6">
-              <div class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
-                <img src="/icon.png" alt="ePrinty" class="w-full h-full object-contain p-2" />
-              </div>
-              <div>
-                <h4 class="text-xl font-semibold text-gray-900">ePrinty</h4>
-                <p class="text-sm text-gray-500 mt-1">让打印这件事，简单一点</p>
-              </div>
-            </div>
-
-            <div class="space-y-4 border-t border-gray-200 pt-4">
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-gray-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                </svg>
-                <div class="flex-1">
-                  <p class="text-xs text-gray-500 mb-0.5">版本号</p>
-                  <p class="text-sm font-medium text-gray-900">{{ version }}</p>
+              <h4 class="text-base font-semibold text-gray-900 mb-4">关于</h4>
+              
+              <!-- 关于内容 -->
+              <div class="space-y-4">
+                <div class="bg-gray-50 rounded-lg p-4">
+                  <div class="flex items-center space-x-3 mb-3">
+                    <div class="bg-blue-100 rounded-lg p-3">
+                      <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-gray-900">ePrinty</p>
+                      <p class="text-xs text-gray-500">版本 {{ version }}</p>
+                    </div>
+                  </div>
+                  <div class="border-t border-gray-200 pt-3">
+                    <p class="text-sm font-medium text-gray-900">易点云 研发中心核心业务组</p>
+                  </div>
                 </div>
               </div>
-
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-gray-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                <div class="flex-1">
-                  <p class="text-xs text-gray-500 mb-0.5">作者</p>
-                  <p class="text-sm font-medium text-gray-900">易点云 研发中心核心业务组</p>
-                </div>
-              </div>
-            </div>
             </div>
 
             <!-- Tab 3：推荐 -->
@@ -568,11 +714,10 @@
       </div>
     </div>
 
-    <!-- 安装进度对话框 -->
+    <!-- 安装进度对话框（基于 install_progress 事件） -->
     <div 
-      v-if="showInstallProgress" 
+      v-if="isInstallModalOpen" 
       class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
-      @click.self="handleInstallProgressBackgroundClick"
     >
       <div 
         class="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden flex flex-col max-h-[90vh]"
@@ -583,10 +728,9 @@
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-900">正在安装打印机</h3>
             <button
-              v-if="installProgress.currentStep >= installProgress.steps.length"
-              @click="closeInstallProgress"
+              @click="closeInstallModal"
               class="text-gray-400 hover:text-gray-600 transition-colors"
-              title="关闭"
+              :title="uiState === 'installing' ? '取消安装' : '关闭'"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -599,60 +743,152 @@
         <div class="px-6 py-6 flex-1 overflow-y-auto min-h-0">
           <!-- 打印机名称 -->
           <div class="mb-4 flex-shrink-0">
-            <h4 class="text-base font-medium text-gray-900 mb-2">{{ installProgress.printerName }}</h4>
-            <p v-if="installProgress.printerPath" class="text-xs text-gray-500">{{ installProgress.printerPath }}</p>
+            <h4 v-if="activeJob" class="text-base font-medium text-gray-900 mb-2">{{ activeJob.printerName }}</h4>
+            <p v-if="activeInstallPrinterPath" class="text-xs text-gray-500">{{ activeInstallPrinterPath }}</p>
+            <p v-if="activeInstallModel" class="text-xs text-gray-500">{{ activeInstallModel }}</p>
+            <p v-if="!activeJob" class="text-sm text-gray-500">正在启动安装任务…</p>
           </div>
 
-          <!-- 进度步骤列表 -->
-          <div class="space-y-3 mb-6">
-            <div
-              v-for="(step, index) in installProgress.steps"
-              :key="index"
-              class="flex items-start space-x-3"
-            >
-              <!-- 步骤图标 -->
-              <div class="flex-shrink-0 mt-0.5">
-                <div
-                  v-if="index < installProgress.currentStep"
-                  class="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center"
-                >
-                  <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                  </svg>
-                </div>
-                <div
-                  v-else-if="index === installProgress.currentStep"
-                  class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center"
-                >
-                  <div class="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-                </div>
-                <div
-                  v-else
-                  class="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center"
-                >
-                  <div class="w-2 h-2 bg-gray-400 rounded-full"></div>
+          <!-- 进度内容 -->
+          <div v-if="activeJob">
+            <!-- 总进度条 -->
+            <div class="mb-6">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700">安装进度</span>
+                <div class="flex items-center space-x-2">
+                  <span class="text-sm text-gray-600">
+                    {{ (installProgressStore.overallProgressPercent || 0).toFixed(1) }}%
+                  </span>
                 </div>
               </div>
-
-              <!-- 步骤内容 -->
-              <div class="flex-1 min-w-0">
-                <p :class="[
-                  'text-sm',
-                  index < installProgress.currentStep ? 'text-gray-700 font-medium' : 
-                  index === installProgress.currentStep ? 'text-blue-600 font-medium' : 
-                  'text-gray-500'
-                ]">
-                  {{ step.name }}
+              <!-- 总进度条 -->
+              <div class="w-full bg-gray-200 rounded-full h-3">
+                <div 
+                  class="h-3 rounded-full transition-all duration-300"
+                  :class="{
+                    'bg-blue-600': (installProgressStore.overallProgressPercent || 0) < 100,
+                    'bg-green-600': (installProgressStore.overallProgressPercent || 0) >= 100 && installProgressStore.activeIsSuccess,
+                    'bg-red-600': installProgressStore.activeIsFailed
+                  }"
+                  :style="{ width: Math.min(installProgressStore.overallProgressPercent || 0, 100) + '%' }"
+                ></div>
+              </div>
+              
+              <!-- 下载阶段详细信息（统一从 store 派生，避免同时显示两种状态） -->
+              <div v-if="installProgressStore.activeDownloadStepProgress" class="mt-3 text-xs">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-gray-600">下载驱动包</span>
+                  <div class="flex items-center space-x-2">
+                    <!-- 只显示一种状态：running 时显示进度，success 时显示完成，failed 时显示失败 -->
+                    <span v-if="installProgressStore.activeDownloadStepProgress.state === 'running' && installProgressStore.activeDownloadStepProgress.currentBytes && installProgressStore.activeDownloadStepProgress.totalBytes" class="text-gray-500">
+                      已下载 {{ formatBytes(installProgressStore.activeDownloadStepProgress.currentBytes) }} / {{ formatBytes(installProgressStore.activeDownloadStepProgress.totalBytes) }}
+                    </span>
+                    <span v-else-if="installProgressStore.activeDownloadStepProgress.state === 'success' && installProgressStore.activeDownloadStepProgress.totalBytes" class="text-gray-500">
+                      下载完成：{{ formatBytes(installProgressStore.activeDownloadStepProgress.totalBytes) }}
+                    </span>
+                    <span v-else-if="installProgressStore.activeDownloadStepProgress.state === 'success'" class="text-gray-500">
+                      下载完成
+                    </span>
+                    <span v-else-if="installProgressStore.activeDownloadStepProgress.state === 'failed'" class="text-red-600">
+                      下载失败
+                    </span>
+                    <span v-if="installProgressStore.activeDownloadStepProgress.state === 'success'" class="text-green-600">✅</span>
+                    <span v-if="installProgressStore.activeDownloadStepProgress.state === 'failed'" class="text-red-600">❌</span>
+                  </div>
+                </div>
+                <!-- 下载进度条（仅在 running 时显示） -->
+                <div v-if="installProgressStore.activeDownloadStepProgress.state === 'running'" class="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                  <div 
+                    class="h-1.5 rounded-full transition-all duration-300 bg-blue-500"
+                    :style="{ width: (installProgressStore.activeDownloadStepProgress.percent || 0) + '%' }"
+                  ></div>
+                </div>
+                <!-- 下载消息（仅在 running 或 failed 时显示，success 时不显示 message） -->
+                <p v-if="installProgressStore.activeDownloadStepProgress.message && installProgressStore.activeDownloadStepProgress.state !== 'success'" 
+                   class="text-xs mt-1"
+                   :class="{
+                     'text-red-600': installProgressStore.activeDownloadStepProgress.state === 'failed',
+                     'text-gray-500': installProgressStore.activeDownloadStepProgress.state === 'running'
+                   }">
+                  {{ installProgressStore.activeDownloadStepProgress.message }}
                 </p>
-                <p v-if="step.message" class="text-xs text-gray-500 mt-0.5">{{ step.message }}</p>
+              </div>
+            </div>
+
+            <!-- 步骤列表 -->
+            <div class="space-y-2 mb-6">
+              <div 
+                v-for="step in activeStepsInOrder"
+                :key="step.stepId"
+                class="flex items-center space-x-3 text-sm"
+              >
+                <!-- 左侧状态图标 -->
+                <div class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                  <svg v-if="step.state === 'running'" class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span v-else-if="step.state === 'success'" class="text-green-600 text-lg">✅</span>
+                  <span v-else-if="step.state === 'skipped'" class="text-gray-400 text-lg" title="已跳过">—</span>
+                  <span v-else-if="step.state === 'failed'" class="text-red-600 text-lg">❌</span>
+                  <span v-else class="text-gray-300 text-lg">○</span>
+                </div>
+                <!-- 中间：label -->
+                <span class="flex-shrink-0" :class="{
+                  'text-blue-600': step.state === 'running',
+                  'text-green-600': step.state === 'success',
+                  'text-gray-500': step.state === 'skipped',
+                  'text-red-600': step.state === 'failed',
+                  'text-gray-700': step.state === 'pending'
+                }">{{ step.label }}</span>
+                <!-- 右侧：message -->
+                <span class="flex-1 text-gray-500 truncate text-xs">
+                  {{ step.message || (step.state === 'pending' ? '等待中' : step.state === 'running' ? '进行中' : step.state === 'success' ? '完成' : step.state === 'skipped' ? '已跳过' : step.state === 'failed' ? '失败' : '') }}
+                </span>
+              </div>
+            </div>
+            
+            <!-- 失败信息（若任务失败） -->
+            <div v-if="activeIsFailed" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div class="text-xs font-medium text-red-800 mb-2">安装失败</div>
+              <div class="space-y-2">
+                <div 
+                  v-for="step in activeStepsInOrder.filter(s => s.state === 'failed')"
+                  :key="step.stepId"
+                  class="text-xs"
+                >
+                  <div class="font-medium text-red-700">{{ step.label }}</div>
+                  <div v-if="step.error" class="text-red-600 mt-1">
+                    <div>{{ step.error.detail }}</div>
+                    <details v-if="step.error.code || step.error.stdout || step.error.stderr" class="mt-2">
+                      <summary class="cursor-pointer text-red-500 hover:text-red-700">查看详情</summary>
+                      <div class="mt-2 space-y-1">
+                        <div v-if="step.error.code" class="text-xs">
+                          <span class="font-medium">错误码:</span> {{ step.error.code }}
+                        </div>
+                        <div v-if="step.error.stdout" class="text-xs font-mono bg-red-100 p-2 rounded">
+                          <span class="font-medium">标准输出:</span>
+                          <pre class="whitespace-pre-wrap">{{ step.error.stdout }}</pre>
+                        </div>
+                        <div v-if="step.error.stderr" class="text-xs font-mono bg-red-100 p-2 rounded">
+                          <span class="font-medium">错误输出:</span>
+                          <pre class="whitespace-pre-wrap">{{ step.error.stderr }}</pre>
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+          <div v-else class="text-sm text-gray-500">
+            正在启动安装任务…
+          </div>
 
-          <!-- 安装结果 -->
-          <div v-if="installProgress.currentStep === installProgress.steps.length" class="mb-4 flex-shrink-0">
+          <!-- 最终结果（兼容旧代码，优先使用 store 状态） -->
+          <div v-if="activeIsSuccess || activeIsFailed" class="mb-4 flex-shrink-0">
             <div
-              v-if="installProgress.success"
+              v-if="activeIsSuccess"
               class="bg-green-50 border border-green-200 rounded-lg p-4"
             >
               <div class="flex items-center space-x-3">
@@ -662,15 +898,12 @@
                   </svg>
                 </div>
                 <div class="flex-1">
-                  <p class="text-sm font-medium text-green-800">安装成功</p>
-                  <p v-if="installProgress.message" class="text-xs text-green-600 mt-1">{{ installProgress.message }}</p>
-                  <p v-if="dryRun" class="text-xs text-yellow-600 mt-1 font-medium">⚠️ 当前为测试模式（dryRun），未执行真实安装</p>
-                  <p v-else class="text-xs text-gray-500 mt-1">ℹ️ 真实安装尚未接入，当前仍为模拟</p>
+                  <p class="text-sm font-medium text-green-800">安装完成</p>
                 </div>
               </div>
             </div>
             <div
-              v-else
+              v-else-if="activeIsFailed"
               class="bg-red-50 border border-red-200 rounded-lg p-4"
             >
               <div class="flex items-center space-x-3">
@@ -680,8 +913,7 @@
                   </svg>
                 </div>
                 <div class="flex-1">
-                  <p class="text-sm font-medium text-red-800">安装失败</p>
-                  <p v-if="installProgress.message" class="text-xs text-red-600 mt-1">{{ installProgress.message }}</p>
+                  <p class="text-sm font-medium text-red-800">安装失败：{{ installProgressStore.activePrimaryError }}</p>
                 </div>
               </div>
             </div>
@@ -690,14 +922,14 @@
 
         <!-- 对话框底部 -->
         <div class="bg-gray-50 border-t border-gray-200 px-6 py-4 flex-shrink-0">
-          <div v-if="installProgress.currentStep < installProgress.steps.length" class="flex items-center justify-center">
+          <div v-if="activeIsRunning" class="flex items-center justify-center">
             <div class="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-200 border-t-blue-600"></div>
             <span class="ml-3 text-sm text-gray-600">正在安装，请稍候...</span>
           </div>
-          <div v-else class="flex items-center space-x-3">
+          <div v-else-if="activeIsSuccess || activeIsFailed" class="flex items-center space-x-3">
             <button
-              v-if="installProgress.success"
-              @click="printTestPage"
+              v-if="activeIsSuccess && activeJob"
+              @click="() => handlePrintTestPage({ name: activeJob.printerName })"
               class="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center justify-center space-x-2"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -706,16 +938,67 @@
               <span>打印测试页</span>
             </button>
             <button
-              @click="closeInstallProgress"
-              class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
-              :disabled="installProgress.currentStep < installProgress.steps.length"
-              :class="{
-                'opacity-50 cursor-not-allowed': installProgress.currentStep < installProgress.steps.length
-              }"
+              v-if="activeIsFailed"
+              @click="() => activeJob && handleInstall({ name: activeJob.printerName, path: activeInstallPrinterPath || '', driver_path: null, model: activeInstallModel })"
+              class="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
             >
-              {{ installProgress.success ? '完成' : '关闭' }}
+              重试
+            </button>
+            <button
+              @click="closeInstallModal"
+              class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
+            >
+              {{ activeIsSuccess ? '完成' : '关闭' }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关闭安装确认对话框 -->
+    <div 
+      v-if="showCloseConfirm" 
+      class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60] backdrop-blur-sm"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden" @click.stop>
+        <!-- 对话框标题 -->
+        <div class="px-6 py-4 border-b bg-yellow-50 border-yellow-200">
+          <h3 class="text-lg font-semibold text-yellow-900">确认中断安装</h3>
+        </div>
+
+        <!-- 对话框内容 -->
+        <div class="px-6 py-6">
+          <div class="flex items-start space-x-4">
+            <div class="rounded-full p-3 flex-shrink-0 bg-yellow-100">
+              <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm text-gray-700">
+                打印机正在安装中，确定要中断安装吗？
+              </p>
+              <p class="text-xs text-gray-500 mt-2">
+                中断后需要重新开始安装流程。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 对话框底部 -->
+        <div class="bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center space-x-3">
+          <button
+            @click="continueInstall"
+            class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
+          >
+            继续安装
+          </button>
+          <button
+            @click="confirmCancelInstall"
+            class="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+          >
+            确认中断
+          </button>
         </div>
       </div>
     </div>
@@ -834,7 +1117,10 @@
               </svg>
             </div>
             <div class="flex-1">
-              <div class="text-sm text-gray-700 whitespace-pre-line">{{ errorDialog.message }}</div>
+              <!-- 使用 <span> 确保 URL 是纯文本，不可点击，不会触发自动 linkify -->
+              <div class="text-sm text-gray-700 whitespace-pre-line">
+                <span>{{ errorDialog.message }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1311,7 +1597,11 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import PrinterItem from './components/PrinterItem.vue'
 import AppTitleBar from "./components/AppTitleBar.vue"
+import { useInstallProgressStore } from './stores/installProgress'
+import { useSystemInfoStore } from './stores/systemInfo'
 import { getAppSettings, setAppSettings, getDriverInstallStrategy } from './settings/appSettings'
+import { createInstallProgressListener } from './services/installProgressListener'
+import { submitInstall, ensureActiveJob } from './services/installService'
 
 export default {
   name: 'App',
@@ -1325,7 +1615,9 @@ export default {
       error: null,
       config: null,
       installedPrinters: [], // 保留用于兼容，但不再在 loadData 中等待
-      selectedAreaIndex: null, // 当前选中的办公区索引
+      selectedCityIndex: 0, // 当前选中的城市索引
+      selectedAreaIndex: 0, // 当前选中的办公区索引
+      expandedCities: new Set(), // 展开的城市索引集合
       initialLoadingPrinters: false, // 首次加载打印机状态（显示加载提示）
       // 打印机检测状态管理
       printerDetect: {
@@ -1337,8 +1629,9 @@ export default {
       statusType: 'info', // 'info', 'success', 'error'
       dingtalkIcon: '/dingtalk_icon.png', // 钉钉图标路径（从 public 目录）
       showHelp: false, // 显示设置对话框
-      settingsTab: 'settings', // 当前选中的tab：'settings' | 'about'
+      settingsTab: 'settings', // 当前选中的tab：'settings' | 'about' | 'info'
       version: '1.4.1', // 软件版本号
+      // 系统信息由 SystemInfoStore 管理，此处不再保存
       // 应用设置
       appSettings: {
         remove_port: false,
@@ -1352,14 +1645,15 @@ export default {
       installingPrinters: new Set(), // 正在安装的打印机名称集合（统一管理安装状态）
       reinstallingPrinters: new Set(), // 正在重装的打印机名称集合
       showInstallProgress: false, // 显示安装进度对话框
-      installProgress: {
-        printerName: '',
-        printerPath: '',
-        steps: [],
-        currentStep: 0,
-        success: false,
-        message: ''
-      },
+      // 开发模式标志
+      isDev: import.meta.env.DEV,
+      // 进度监听器服务引用（用于避免重复注册）
+      _installProgressListener: null,
+      // 安装弹窗状态管理
+      isInstallModalOpen: false, // 安装弹窗是否打开
+      showCloseConfirm: false, // 显示关闭确认对话框
+      activeInstallPrinterPath: null, // 当前安装的打印机路径
+      activeInstallModel: null, // 当前安装的打印机型号
       showTestPageResult: false, // 显示打印测试页结果对话框
       testPageResult: {
         success: false,
@@ -1420,12 +1714,49 @@ export default {
     }
   },
   computed: {
+    // Store 相关计算属性
+    installProgressStore() {
+      return useInstallProgressStore()
+    },
+    systemInfoStore() {
+      return useSystemInfoStore()
+    },
+    activeJob() {
+      return this.installProgressStore.activeJob
+    },
+    activeTotalPercent() {
+      return this.installProgressStore.activeTotalPercent
+    },
+    activeStepsInOrder() {
+      return this.installProgressStore.activeStepsInOrder
+    },
+    activeIsRunning() {
+      return this.installProgressStore.deriveUIState === 'installing'
+    },
+    activeIsFailed() {
+      return this.installProgressStore.deriveUIState === 'error'
+    },
+    activeIsSuccess() {
+      return this.installProgressStore.deriveUIState === 'success'
+    },
+    uiState() {
+      return this.installProgressStore.deriveUIState
+    },
+    uiPercent() {
+      return this.installProgressStore.derivePercent
+    },
     // 当前选中的办公区
     selectedArea() {
-      if (this.selectedAreaIndex === null || !this.config || !this.config.areas) {
+      if (!this.config || !this.config.cities || this.config.cities.length === 0) {
         return null
       }
-      return this.config.areas[this.selectedAreaIndex]
+      
+      const city = this.config.cities[this.selectedCityIndex]
+      if (!city || !city.areas || city.areas.length === 0) {
+        return null
+      }
+      
+      return city.areas[this.selectedAreaIndex] || null
     },
     // 筛选后的调试日志
     filteredDebugLogs() {
@@ -1434,6 +1765,9 @@ export default {
       }
       return this.debugLogs.filter(log => log.type === this.debugLogFilter)
     }
+  },
+  watch: {
+    // Watchers removed: UI now derives from store only
   },
   async mounted() {
     // 软件一打开就显示加载提示
@@ -1467,6 +1801,8 @@ export default {
     this.loadDryRunSetting()
     // 设置调试按钮显示功能
     this.setupDebugButtonToggle()
+    // 设置进度事件监听
+    this.setupProgressListener()
     // 确保根元素可以获得焦点（用于接收键盘事件）
     this.$nextTick(() => {
       if (this.$refs.appFrame) {
@@ -1477,6 +1813,11 @@ export default {
   },
   beforeUnmount() {
     this.restoreConsole()
+    // 注销进度监听器
+    if (this._installProgressListener) {
+      this._installProgressListener.stop()
+      this._installProgressListener = null
+    }
   },
   methods: {
     async checkVersionUpdate() {
@@ -1497,9 +1838,25 @@ export default {
       this.settingsTab = 'settings' // 默认选中"设置"tab
       this.showHelp = true
     },
+    // 系统信息由 SystemInfoStore 管理，不再需要 loadSystemInfo 方法
+    // 选择城市（切换展开状态）
+    toggleCity(cityIndex) {
+      if (this.expandedCities.has(cityIndex)) {
+        this.expandedCities.delete(cityIndex)
+      } else {
+        this.expandedCities.add(cityIndex)
+      }
+    },
+    
     // 选择办公区
-    selectArea(index) {
-      this.selectedAreaIndex = index
+    selectArea(cityIndex, areaIndex) {
+      this.selectedCityIndex = cityIndex
+      this.selectedAreaIndex = areaIndex
+      
+      // 确保所属城市已展开
+      if (!this.expandedCities.has(cityIndex)) {
+        this.expandedCities.add(cityIndex)
+      }
       
       // 切换办公区时，初始化当前办公区的安装方式默认值
       if (this.selectedArea && this.selectedArea.printers) {
@@ -1534,16 +1891,18 @@ export default {
     // 初始化打印机运行时状态
     initializePrinterRuntime() {
       this.printerRuntime = {}
-      if (this.config && this.config.areas) {
-        this.config.areas.forEach(area => {
-          if (area.printers) {
-            area.printers.forEach(printer => {
-              // Vue 3 中直接赋值即可，不需要 $set
-              this.printerRuntime[printer.name] = {
-                detectState: 'detecting'
-              }
-            })
-          }
+      if (this.config && this.config.cities) {
+        this.config.cities.forEach(city => {
+          city.areas.forEach(area => {
+            if (area.printers) {
+              area.printers.forEach(printer => {
+                // Vue 3 中直接赋值即可，不需要 $set
+                this.printerRuntime[printer.name] = {
+                  detectState: 'detecting'
+                }
+              })
+            }
+          })
         })
       }
     },
@@ -1577,18 +1936,36 @@ export default {
         
         console.log(`[PrinterDetect][Frontend] ATTEMPT_START detect_id=${detectId} attempt=${attempt} timeout_ms=${timeoutMs} status=${this.printerDetect.status}`)
         
+        // 用于存储 timeout ID，以便在成功/失败时清除
+        let timeoutId = null
+        let detectCompleted = false
+        
         try {
           // 调用后端接口（带超时机制）
           console.log(`[PrinterDetect][Frontend] INVOKE_START detect_id=${detectId} attempt=${attempt}`)
           const detectPromise = invoke('list_printers')
+          
           const timeoutPromise = new Promise((resolve) => {
-            setTimeout(() => {
-              console.log(`[PrinterDetect][Frontend] TIMEOUT_TRIGGERED detect_id=${detectId} attempt=${attempt} timeout_ms=${timeoutMs}`)
-              resolve(null) // 超时返回 null
+            timeoutId = setTimeout(() => {
+              // 检查是否已完成，防止成功后仍触发超时
+              if (!detectCompleted) {
+                console.log(`[PrinterDetect][Frontend] TIMEOUT_TRIGGERED detect_id=${detectId} attempt=${attempt} timeout_ms=${timeoutMs}`)
+                resolve(null) // 超时返回 null
+              } else {
+                console.debug(`[PrinterDetect][Frontend] TIMEOUT_IGNORED detect_id=${detectId} attempt=${attempt} reason=already_completed`)
+              }
             }, timeoutMs)
           })
           
           const result = await Promise.race([detectPromise, timeoutPromise])
+          
+          // 标记为已完成，清除 timeout
+          detectCompleted = true
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          
           const attemptElapsed = performance.now() - attemptStartTime
           
           if (result === null) {
@@ -1648,6 +2025,13 @@ export default {
             throw new Error('返回结果格式异常')
           }
         } catch (err) {
+          // 标记为已完成，清除 timeout（防止异常时仍触发超时）
+          detectCompleted = true
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          
           const attemptElapsed = performance.now() - attemptStartTime
           console.log(`[PrinterDetect][Frontend] INVOKE_REJECT detect_id=${detectId} attempt=${attempt} elapsed_ms=${attemptElapsed.toFixed(2)} error=${err}`)
           console.error(`[PrinterDetect][Frontend] EXCEPTION detect_id=${detectId} attempt=${attempt}`, err)
@@ -1715,57 +2099,36 @@ export default {
           throw new Error('配置加载失败：配置数据为空')
         }
         
-        if (!configResult.config.areas || configResult.config.areas.length === 0) {
-          console.warn('警告：配置中没有打印机区域数据')
-          this.statusMessage = '配置加载成功，但未找到打印机数据'
-          this.statusType = 'info'
+        // 【强制校验】cities 字段必须存在且非空
+        if (!configResult.config.cities || !Array.isArray(configResult.config.cities) || configResult.config.cities.length === 0) {
+          throw new Error('配置文件缺少 cities 字段或为空。请升级 printer_config.json 为城市->办公区结构。\n\n参考格式：\n{\n  "cities": [{\n    "cityId": "beijing",\n    "cityName": "北京",\n    "areas": [...]\n  }]\n}')
         }
 
-        // 配置加载成功
+        // 直接使用配置（不再进行任何 normalize/迁移）
         this.config = configResult.config
-        
-        
-        // 检查是否有远程更新
-        if (configResult.has_remote_update && configResult.remote_config) {
-          // 有远程更新，显示更新提示对话框
-          this.showUpdateDialog = true
-          this.pendingRemoteConfig = configResult.remote_config
-          this.localVersion = configResult.local_version || '未知'
-          this.remoteVersion = configResult.remote_version || '未知'
-          this.statusMessage = '检测到远程配置更新，请确认是否更新'
-          this.statusType = 'info'
-        } else {
-          // 显示配置来源和远程加载状态
-          if (configResult.source === 'local') {
-            if (configResult.remote_error) {
-              // 使用本地配置，但远程加载失败（只提示，不影响使用）
-              this.statusMessage = `已加载本地配置（远程更新失败：${configResult.remote_error}）`
-              this.statusType = 'info' // 使用 info 而不是 error，因为不影响使用
-            } else {
-              this.statusMessage = '已加载本地配置'
-              this.statusType = 'success'
-            }
-          } else {
-            this.statusMessage = '已加载远程配置'
-            this.statusType = 'success'
-          }
-        }
 
         // 初始化打印机运行时状态（所有打印机初始为 detecting）
         this.initializePrinterRuntime()
         
         // 初始化安装方式默认值（从配置文件中读取）
-        if (this.config && this.config.areas) {
-          this.config.areas.forEach(area => {
-            if (area.printers) {
-              this.initInstallModeDefaults(area.printers)
-            }
+        if (this.config && this.config.cities) {
+          this.config.cities.forEach(city => {
+            city.areas.forEach(area => {
+              if (area.printers) {
+                this.initInstallModeDefaults(area.printers)
+              }
+            })
           })
         }
         
-        // 如果有办公区且未选择，自动选择第一个
-        if (this.config && this.config.areas && this.config.areas.length > 0 && this.selectedAreaIndex === null) {
-          this.selectedAreaIndex = 0
+        // 如果有城市且未选择，自动选择第一个城市的第一个办公区
+        if (this.config && this.config.cities && this.config.cities.length > 0 && !this.selectedAreaIndex) {
+          const firstCity = this.config.cities[0]
+          if (firstCity.areas && firstCity.areas.length > 0) {
+            this.selectedCityIndex = 0
+            this.selectedAreaIndex = 0
+            this.expandedCities.add(0) // 默认展开第一个城市
+          }
         }
         
         // 如果不是首次加载（initialLoadingPrinters 为 false），立即设置 loading = false
@@ -1790,12 +2153,31 @@ export default {
     },
             async handleInstall(printer) {
               // 获取当前选择的安装方式
-              const installMode = this.getInstallMode(printer)
+              let installMode = this.getInstallMode(printer)
+              
+              // 校验安装方式，禁用项回退到推荐模式
+              const disabledModes = ['installer', 'ipp', 'legacy_inf']
+              if (disabledModes.includes(installMode)) {
+                console.warn(`[InstallMode] ${installMode} is disabled, fallback to package`)
+                installMode = 'package'
+                // 更新缓存
+                const key = this.getPrinterKey(printer)
+                this.installModeByPrinter[key] = 'package'
+                // 提示用户
+                this.statusMessage = '该安装方式暂未开放，已切换到推荐模式'
+                this.statusType = 'info'
+                setTimeout(() => {
+                  if (this.statusMessage === '该安装方式暂未开放，已切换到推荐模式') {
+                    this.statusMessage = ''
+                    this.statusType = ''
+                  }
+                }, 3000)
+              }
               
               // 获取打印机唯一标识 key
               const key = this.getPrinterKey(printer)
               
-              // [InstallClick] 打印安装方式（同时输出 mode 和 printer.install_mode 用于对比验证）
+              // [InstallClick] 打印安装方式
               console.log('[InstallClick]', { 
                 key,
                 name: printer.name,
@@ -1807,348 +2189,153 @@ export default {
               // 开始安装：添加到 installingPrinters Set
               this.installingPrinters.add(printer.name)
               
-              // [UI][InstallClick] 插桩日志 - 记录点击时的状态
-              console.log(`[UI][InstallClick] id=${printer.name} before=installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)}`)
+              // 打开弹窗（等待事件绑定 jobId）
+              this.isInstallModalOpen = true
+              this.activeInstallPrinterPath = printer.path
+              this.activeInstallModel = printer.model || null
+              
+              // 重置活动任务（等待第一条事件）
+              const store = useInstallProgressStore()
+              store.setActiveJob(null)
+              
+              // 提前设置 pending meta（确保事件到达时 installMode 可用）
+              // 兼容历史 'package' 值，统一为 'package_only'
+              const normalizedMode = installMode === 'package' ? 'package_only' : installMode
+              store.setPendingJobMeta(printer.name, { installMode: normalizedMode })
               
               console.info('========================================')
               console.info(`🚀 开始安装打印机: ${printer.name}`)
               console.info(`📍 打印机路径: ${printer.path}`)
-              console.info(`🔧 驱动路径: ${printer.driver_path || '(未配置)'}`)
+              console.info(`� 驱动键: ${printer.driverKey || '(未配置)'}`)
               console.info(`📋 型号: ${printer.model || '(未配置)'}`)
-              console.info(`🔧 安装方式: ${installMode}`)
+              console.info(`🔧 安装方式: ${normalizedMode}`)
               
-              if (!printer.driver_path) {
-                console.warn('⚠️ 警告: printer.driver_path 为空！可能是配置文件中没有该字段或读取时丢失了')
+              if (!printer.driverKey) {
+                console.error('❌ 错误: printer.driverKey 为空！配置文件可能不符合 v2.0.0+ 格式')
+                throw new Error(`打印机 '${printer.name}' 缺少 driverKey，请检查 printer_config.json`)
               }
-              
-              // 初始化安装进度（按平台显示不同的步骤）
-              // macOS: 安全优先，尽量提示用户使用系统方式（lpadmin / 系统设置）或提供 PPD
-              // Windows: 保留原有的详细自动化步骤（INF 安装 / Add-Printer 等）
-              const isMac = typeof navigator !== 'undefined' && navigator.platform && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-              let steps = []
-
-              if (isMac) {
-                // macOS 专用步骤 —— 不主动调用 Windows 特有的安装流程
-                if (printer.driver_path) {
-                  steps.push({ name: '准备 PPD/驱动 (可选)', message: '' })
-                }
-                steps.push({ name: '通过系统或 lpadmin 添加打印机', message: '' })
-                steps.push({ name: '检查打印机是否在线', message: '' })
-              } else {
-                // Windows / 其他平台使用原有流程
-                steps = [
-                  { name: '检查打印机驱动', message: '' },
-                  { name: '添加打印机端口', message: '' }
-                ]
-
-                if (printer.driver_path) {
-                  steps.push({ name: '查找品牌驱动', message: '' })
-                  steps.push({ name: '从配置文件安装 INF 驱动', message: '' })
-                }
-
-                steps.push(
-                  { name: '安装打印机驱动', message: '' },
-                  { name: '配置打印机', message: '' },
-                  { name: '验证安装', message: '' }
-                )
-              }
-              
-              this.installProgress = {
-                printerName: printer.name,
-                printerPath: printer.path,
-                steps: steps,
-                currentStep: 0,
-                success: false,
-                message: ''
-              }
-              
-              // 显示进度对话框
-              this.showInstallProgress = true
-              this.statusMessage = `正在安装 ${printer.name}...`
-              this.statusType = 'info'
 
               try {
-                let stepIndex = 0
-                
-                // 步骤1: 检查打印机驱动
-                console.info(`[步骤 ${stepIndex + 1}] 检查打印机驱动`)
-                this.updateProgressStep(stepIndex, '正在检查系统中是否有可用的打印机驱动...')
-                await this.delay(300)
-                console.info(`[步骤 ${stepIndex + 1}] ✓ 检查完成`)
-                stepIndex++
-                
-                // 步骤2: 添加打印机端口
-                console.info(`[步骤 ${stepIndex + 1}] 添加打印机端口`)
-                this.updateProgressStep(stepIndex, '正在添加打印机端口...')
-                await this.delay(500)
-                console.info(`[步骤 ${stepIndex + 1}] ✓ 端口添加完成`)
-                stepIndex++
-                
-                // 如果有配置的驱动路径，添加额外步骤
-                if (printer.driver_path) {
-                  // 步骤4: 查找品牌驱动
-                  console.info(`[步骤 ${stepIndex + 1}] 查找品牌驱动`)
-                  this.updateProgressStep(stepIndex, '正在查找品牌驱动...')
-                  await this.delay(400)
-                  console.info(`[步骤 ${stepIndex + 1}] ✓ 查找完成`)
-                  stepIndex++
-                  
-                  // 步骤5: 从配置文件安装 INF 驱动
-                  console.info(`[步骤 ${stepIndex + 1}] 从配置文件安装 INF 驱动: ${printer.driver_path}`)
-                  this.updateProgressStep(stepIndex, `正在从配置文件安装 INF 驱动: ${printer.driver_path}...`)
-                  await this.delay(600)
-                  console.info(`[步骤 ${stepIndex + 1}] ✓ INF 驱动安装完成`)
-                  stepIndex++
-                }
-                
-                // 步骤N: 安装打印机驱动
-                console.info(`[步骤 ${stepIndex + 1}] 安装打印机驱动`)
-                this.updateProgressStep(stepIndex, '正在安装打印机驱动...')
-                await this.delay(800)
-                console.info(`[步骤 ${stepIndex + 1}] ✓ 驱动安装完成`)
-                stepIndex++
-                
-                // 步骤N+1: 配置打印机
-                console.info(`[步骤 ${stepIndex + 1}] 配置打印机`)
-                this.updateProgressStep(stepIndex, '正在配置打印机...')
-                await this.delay(500)
-                
-                // 调用后端安装函数（在配置打印机步骤中调用，这样可以实时反映进度）
-                // 确保 driver_path 正确传递（处理 undefined、null 和空字符串）
-                const driverPathParam = printer.driver_path && printer.driver_path.trim() !== '' 
-                  ? printer.driver_path 
-                  : null
-                const modelParam = printer.model && printer.model.trim() !== '' 
-                  ? printer.model 
-                  : null
-                
-                // 尝试使用 camelCase 参数名，因为 Tauri 可能对带下划线的参数名有问题
-                const installParams = {
+                // 准备安装参数（新版 v2.0.0+ 使用 driverKey，不再传 driverPath）
+                const installRequest = {
                   name: printer.name,
                   path: printer.path,
-                  driverPath: driverPathParam,  // 改为 camelCase，匹配 Rust 端的参数名
-                  model: modelParam,
-                  // TODO: 后续应使用统一设置接口获取驱动安装策略
-                  // 使用方式：const strategy = this.getDriverInstallStrategy()
-                  // 然后映射到后端参数：'always_install_inf' -> 'always', 'skip_if_driver_exists' -> 'reuse_if_installed'
-                  driverInstallPolicy: this.driverInstallPolicy,  // 驱动安装策略（临时兼容，后续迁移到统一设置）
-                  installMode: installMode,  // 安装方式：从 UI 选择器获取（使用 camelCase 匹配 Rust 端）
-                  dryRun: this.dryRun  // 测试模式：从设置中获取（使用 camelCase 匹配 Rust 端）
+                  driverKey: printer.driverKey, // 关键：v2.0.0+ 使用 driverKey 替代 driverPath
+                  model: printer.model && printer.model.trim() !== '' 
+                    ? printer.model 
+                    : null,
+                  driverInstallPolicy: this.driverInstallPolicy,
+                  installMode: installMode, // 保持原值传给后端
+                  dryRun: this.dryRun
                 }
                 
-                console.info('📤 调用后端安装函数')
-                console.info(`参数:`, JSON.stringify(installParams, null, 2))
-                console.info(`[Frontend] dryRun=${this.dryRun}, installMode=${installMode}`)
+                // 调用统一安装服务
+                const result = await submitInstall(installRequest)
                 
-                const installPromise = invoke('install_printer', installParams)
+                // 输出简洁摘要
+                console.info('📥 安装结果摘要')
+                console.info(`✓ 成功: ${result.success}`)
+                console.info(`✓ jobId: ${result.jobId || '(未返回)'}`)
+                console.info(`✓ 消息: ${result.message}`)
+                if (result.method) {
+                  console.info(`✓ 方法: ${result.method}`)
+                }
                 
-                // 等待安装完成（不阻塞，但会在后台运行）
-                const result = await installPromise
-                
-                console.info('📥 后端返回结果')
-                console.info(`成功: ${result.success}`)
-                console.info(`方法: ${result.method || '未知'}`)
-                console.info(`消息: ${result.message}`)
-                
-                // 输出 PowerShell 执行结果到调试模式
+                // 详细日志输出到 debug（不在主日志中堆砌大段文本）
                 if (result.stdout) {
-                  console.log('📋 PowerShell 标准输出:')
-                  console.log(result.stdout)
+                  console.debug('📋 PowerShell stdout:', result.stdout)
                 }
                 if (result.stderr) {
-                  console.error('❌ PowerShell 错误输出:')
-                  console.error(result.stderr)
+                  console.debug('⚠️ PowerShell stderr:', result.stderr)
                 }
                 
+                // 如果有 jobId，确保 store 设置活动任务
+                if (result.jobId) {
+                  ensureActiveJob(store, result.jobId, printer.name)
+                }
                 
-                // 步骤N+2: 验证安装
-                console.info(`[步骤 ${stepIndex + 1}] 验证安装`)
-                this.updateProgressStep(stepIndex, '正在验证安装...')
-                await this.delay(300)
+                // 确定最终 jobId（优先使用返回的 jobId）
+                const finalJobId = result.jobId || store.activeJobId
+                
+                // 启动 watchdog：如果有 jobId，通知 store 安装已完成
+                // job.done 事件是最终权威，finalize 设置 watchdog 等待终态
+                if (finalJobId) {
+                  store.finalizeFromInvoke(finalJobId, {
+                    success: result.success,
+                    message: result.message,
+                    job_id: result.jobId
+                  })
+                }
                 
                 if (result.success) {
-                  console.info(`[步骤 ${stepIndex + 1}] ✓ 验证通过`)
                   console.info('✅ 打印机安装成功!')
-                  
-                  // [UI][InstallSuccessSignal] 插桩日志 - 成功信号来源：invoke返回值
-                  console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="${result.message || '安装成功'}" source=invoke installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
-                  
-                  // 更新步骤为完成
-                  if (stepIndex < this.installProgress.steps.length && this.installProgress.steps[stepIndex]) {
-                    this.installProgress.steps[stepIndex].message = '验证通过'
-                  }
-                  
-                  // 如果使用了配置文件驱动，更新对应步骤的消息
-                  if (printer.driver_path) {
-                    // 查找"从配置文件安装 INF 驱动"步骤
-                    const infInstallStepIndex = this.installProgress.steps.findIndex(step => 
-                      step && step.name === '从配置文件安装 INF 驱动'
-                    )
-                    if (infInstallStepIndex >= 0 && this.installProgress.steps[infInstallStepIndex]) {
-                      this.installProgress.steps[infInstallStepIndex].message = 'INF 驱动安装成功'
-                    }
-                  }
-                  
-                  // 显示安装方式和消息
-                  const method = result.method || '未知'
-                  const dryRunMessage = this.dryRun 
-                    ? '（当前为测试模式，未执行真实安装）' 
-                    : '（真实安装尚未接入，当前仍为模拟）'
-                  this.installProgress.success = true
-                  this.installProgress.message = `${result.message || '安装成功'}${dryRunMessage}`
-                  this.statusMessage = `${result.message || '安装成功'} [方式: ${method}]${dryRunMessage}`
-                  this.statusType = 'success'
-                  
                   // 重新检测已安装的打印机列表（异步，不阻塞）
                   this.startDetectInstalledPrinters()
                 } else {
-                  // 安装失败
-                  console.error(`[步骤 ${stepIndex + 1}] ✗ 验证失败`)
-                  console.error('❌ 打印机安装失败!')
-                  console.error(`错误消息: ${result.message}`)
-                  
-                  // [UI][InstallSuccessSignal] 插桩日志 - 失败信号来源：invoke返回值
-                  console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="${result.message || '安装失败'}" source=invoke installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
-                  
-                  if (stepIndex < this.installProgress.steps.length && this.installProgress.steps[stepIndex]) {
-                    this.installProgress.steps[stepIndex].message = '验证失败'
-                  }
-                  
-                  // 如果使用了配置文件驱动，更新对应步骤的消息
-                  if (printer.driver_path) {
-                    // 查找"从配置文件安装 INF 驱动"步骤
-                    const infInstallStepIndex = this.installProgress.steps.findIndex(step => 
-                      step && step.name === '从配置文件安装 INF 驱动'
-                    )
-                    if (infInstallStepIndex >= 0 && this.installProgress.steps[infInstallStepIndex]) {
-                      this.installProgress.steps[infInstallStepIndex].message = 'INF 驱动安装失败或未找到'
-                    }
-                  }
-                  
-                  this.installProgress.success = false
-                  const method = result.method || '未知'
-                  this.installProgress.message = result.message || '安装失败'
-                  this.statusMessage = `${result.message || '安装失败'} [方式: ${method}]`
-                  this.statusType = 'error'
+                  console.error('❌ 打印机安装失败:', result.message)
                 }
+              } catch (error) {
+                console.error('❌ 安装过程中发生错误:', error)
                 
-                // 标记所有步骤完成
-                this.installProgress.currentStep = this.installProgress.steps.length
-                console.info('========================================')
-                console.info('安装过程完成')
-                
-              } catch (err) {
-                console.error('========================================')
-                console.error('❌ 安装过程发生异常')
-                console.error('异常详情:', err)
-                if (err && err.stack) {
-                  console.error('调用栈:', err.stack)
+                // 兜底 finalize：即使 invoke 失败，也要收敛
+                const finalJobId = store.activeJobId
+                if (finalJobId) {
+                  store.finalizeFromInvoke(finalJobId, {
+                    success: false,
+                    message: error.message || error.toString()
+                  })
                 }
-                
-                // [UI][InstallSuccessSignal] 插桩日志 - 异常情况
-                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="异常: ${err}" source=exception installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
-                
-                this.installProgress.success = false
-                const errorMessage = err && err.toString ? err.toString() : (typeof err === 'string' ? err : '安装失败')
-                this.installProgress.message = errorMessage
-                this.statusMessage = `安装失败: ${errorMessage}`
-                this.statusType = 'error'
-                this.installProgress.currentStep = this.installProgress.steps.length
-                console.error('========================================')
-              }
-              finally {
-                // [UI][InstallSuccessSignal] 插桩日志 - finally 块执行
-                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="进入finally块" source=finally installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
-                
-                // 关键：无论成功/失败/异常，都要释放按钮状态
+              } finally {
+                // 从 installingPrinters Set 中移除
                 this.installingPrinters.delete(printer.name)
-                
-                // [UI][InstallSuccessSignal] 插桩日志 - 清理后状态
-                console.log(`[UI][InstallSuccessSignal] id=${printer.name} message="已清理installing状态" source=finally installingPrinters.has(${printer.name})=${this.installingPrinters.has(printer.name)} state=${this.isInstalled(printer.name) ? 'installed' : 'idle'}`)
-
-                // 安装进度对话框不再自动关闭，用户需要手动关闭
-              }
-            },
-            updateProgressStep(stepIndex, message) {
-              if (stepIndex >= 0 && 
-                  stepIndex < this.installProgress.steps.length && 
-                  this.installProgress.steps[stepIndex]) {
-                this.installProgress.currentStep = stepIndex
-                if (message) {
-                  this.installProgress.steps[stepIndex].message = message
-                }
-              } else {
-                console.warn(`updateProgressStep: stepIndex ${stepIndex} 超出范围或步骤不存在`)
               }
             },
             delay(ms) {
               return new Promise(resolve => setTimeout(resolve, ms))
             },
-            closeInstallProgress() {
-              // 只有在安装完成或失败时才允许关闭
-              if (this.installProgress.currentStep >= this.installProgress.steps.length) {
-                this.showInstallProgress = false
-                // 重置进度
-                this.installProgress = {
-                  printerName: '',
-                  printerPath: '',
-                  steps: [],
-                  currentStep: 0,
-                  success: false,
-                  message: ''
-                }
-              }
-            },
-            handleReinstallProgressBackgroundClick() {
-              // 重装进度对话框背景点击处理（仅在完成时允许关闭）
-              if (this.reinstallProgress.currentStep >= this.reinstallProgress.steps.length) {
-                this.closeReinstallProgress()
-              }
-            },
-            updateReinstallProgressStep(stepIndex, message) {
-              if (stepIndex >= 0 && 
-                  stepIndex < this.reinstallProgress.steps.length && 
-                  this.reinstallProgress.steps[stepIndex]) {
-                this.reinstallProgress.currentStep = stepIndex
-                if (message) {
-                  this.reinstallProgress.steps[stepIndex].message = message
-                }
-              } else {
-                console.warn(`updateReinstallProgressStep: stepIndex ${stepIndex} 超出范围或步骤不存在`)
-              }
-            },
-            closeReinstallProgress() {
-              // 只有在重装完成或失败时才允许关闭
-              if (this.reinstallProgress.currentStep >= this.reinstallProgress.steps.length) {
-                this.showReinstallProgress = false
-                // 重置进度
-                this.reinstallProgress = {
-                  printerName: '',
-                  printerPath: '',
-                  steps: [],
-                  currentStep: 0,
-                  success: false,
-                  message: ''
-                }
-              }
-            },
-            handleInstallProgressBackgroundClick() {
-              // 只有在安装完成或失败时才允许通过点击背景关闭
-              if (this.installProgress.currentStep >= this.installProgress.steps.length) {
-                this.closeInstallProgress()
-              }
-            },
+    // 关闭安装弹窗
+    closeInstallModal() {
+      // 安装中需要二次确认
+      if (this.uiState === 'installing') {
+        this.showCloseConfirm = true
+        return
+      }
+      // 非安装中直接关闭
+      this.isInstallModalOpen = false
+    },
+    // 确认中断安装
+    confirmCancelInstall() {
+      const jobId = this.installProgressStore.activeJobId
+      if (jobId) {
+        this.installProgressStore.cancelJob(jobId)
+      }
+      this.showCloseConfirm = false
+      this.isInstallModalOpen = false
+    },
+    // 继续安装（取消确认对话框）
+    continueInstall() {
+      this.showCloseConfirm = false
+    },
+    // 格式化字节数
+    formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B'
+      const k = 1024
+      const sizes = ['B', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+    },
             async printTestPage() {
               try {
                 // 调用后端打印测试页
+                const printerName = this.installProgressStore.activeJob?.printerName || 'Unknown'
                 const result = await invoke('print_test_page', { 
-                  printerName: this.installProgress.printerName
+                  printerName: printerName
                 })
                 
                 // 显示成功对话框
                 this.testPageResult = {
                   success: true,
-                  message: result || `测试页已成功发送到打印机: ${this.installProgress.printerName}`
+                  message: result || `测试页已成功发送到打印机: ${printerName}`
                 }
                 this.showTestPageResult = true
               } catch (err) {
@@ -2223,13 +2410,8 @@ export default {
                 // 关闭对话框
                 this.closeVersionUpdateDialog()
                 
-                // 可选：自动打开下载的文件
-                if (this.versionUpdateInfo.update_url) {
-                  // 延迟一下，让用户看到提示
-                  setTimeout(() => {
-                    window.open(this.versionUpdateInfo.update_url, '_blank')
-                  }, 1000)
-                }
+                // 注意：不再自动打开下载的文件，避免触发 IDM
+                // 用户可以通过其他方式访问更新文件
               } catch (err) {
                 console.error('下载更新失败:', err)
                 this.statusMessage = `下载更新失败: ${err}`
@@ -2301,20 +2483,26 @@ export default {
           this.initializePrinterRuntime()
           
           // 初始化安装方式默认值（从更新后的配置文件中读取）
-          if (this.config && this.config.areas) {
-            this.config.areas.forEach(area => {
-              if (area.printers) {
-                this.initInstallModeDefaults(area.printers)
-              }
+          if (this.config && this.config.cities) {
+            this.config.cities.forEach(city => {
+              city.areas.forEach(area => {
+                if (area.printers) {
+                  this.initInstallModeDefaults(area.printers)
+                }
+              })
             })
           }
           
           this.startDetectInstalledPrinters()
           
-          // 如果有选中的办公区，保持选中状态
-          if (this.selectedAreaIndex !== null && this.config && this.config.areas) {
-            // 确保选中的索引仍然有效
-            if (this.selectedAreaIndex >= this.config.areas.length) {
+          // 保持当前选中的办公区（如果仍然存在）
+          if (this.selectedAreaIndex >= 0) {
+            // 验证选中的城市和办公区是否仍然存在
+            if (this.selectedCityIndex < 0 || 
+                this.selectedCityIndex >= this.config.cities.length ||
+                this.selectedAreaIndex >= this.config.cities[this.selectedCityIndex].areas.length) {
+              // 当前选中的办公区已不存在，重置选择
+              this.selectedCityIndex = 0
               this.selectedAreaIndex = 0
             }
           }
@@ -2367,6 +2555,128 @@ export default {
     // 设置调试按钮显示功能
     setupDebugButtonToggle() {
       // 此方法保留用于未来扩展，当前通过模板上的 @keydown 处理按键
+    },
+    // 创建默认的 PhaseProgress
+    defaultPhase() {
+      return {
+        state: 'pending',
+        updatedAt: Date.now()
+      }
+    },
+    // 创建默认的 PrinterProgress
+    defaultPrinterProgress(printerName) {
+      return {
+        printerName: printerName || null, // 记录打印机名称
+        phases: {
+          download: this.defaultPhase(),
+          verify: this.defaultPhase(),
+          extract: this.defaultPhase(),
+          stageDriver: this.defaultPhase(),
+          registerDriver: this.defaultPhase(),
+          ensurePort: this.defaultPhase(),
+          ensureQueue: this.defaultPhase(),
+          finalVerify: this.defaultPhase()
+        },
+        updatedAt: Date.now(),
+        visible: true,
+        // 容错：未知 phase 的额外信息
+        extra: [],
+        // 最后的消息（用于显示当前动作）
+        lastMessage: null
+      }
+    },
+    // 将后端的 phase 转换为前端的 phaseKey（兼容多种格式）
+    normalizePhase(raw) {
+      if (!raw) {
+        console.warn('[normalizePhase] raw is null/undefined')
+        return null
+      }
+      const s = String(raw).trim()
+      
+      // 直接命中（与后端一致的标准格式）
+      const knownPhases = ['download', 'verify', 'extract', 'stageDriver', 'registerDriver', 'ensurePort', 'ensureQueue', 'finalVerify']
+      if (knownPhases.includes(s)) {
+        return s
+      }
+      
+      // 兼容：首字母大写格式
+      const phaseMap = {
+        'Download': 'download',
+        'Verify': 'verify',
+        'Extract': 'extract',
+        'StageDriver': 'stageDriver',
+        'RegisterDriver': 'registerDriver',
+        'EnsurePort': 'ensurePort',
+        'EnsureQueue': 'ensureQueue',
+        'FinalVerify': 'finalVerify'
+      }
+      if (phaseMap[s]) {
+        return phaseMap[s]
+      }
+      
+      // 兼容：snake_case / kebab-case / 全小写
+      const lower = s.toLowerCase()
+      const normalizedMap = {
+        'download': 'download',  // 确保小写 download 也能识别
+        'verify': 'verify',
+        'extract': 'extract',
+        'stagedriver': 'stageDriver',
+        'stage_driver': 'stageDriver',
+        'stage-driver': 'stageDriver',
+        'registerdriver': 'registerDriver',
+        'register_driver': 'registerDriver',
+        'register-driver': 'registerDriver',
+        'ensureport': 'ensurePort',
+        'ensure_port': 'ensurePort',
+        'ensure-port': 'ensurePort',
+        'ensurequeue': 'ensureQueue',
+        'ensure_queue': 'ensureQueue',
+        'ensure-queue': 'ensureQueue',
+        'finalverify': 'finalVerify',
+        'final_verify': 'finalVerify',
+        'final-verify': 'finalVerify'
+      }
+      if (normalizedMap[lower]) {
+        return normalizedMap[lower]
+      }
+      
+      // 无法识别，返回 null（将由容错逻辑处理）
+      console.warn('[normalizePhase] 无法识别的 phase:', s, 'lower:', lower, 'raw type:', typeof raw)
+      return null
+    },
+    // 将后端的 camelCase state 转换为前端的 state
+    normalizeState(state) {
+      // 后端使用 serde(rename_all = "camelCase")，所以：
+      // Pending -> pending, Running -> running, Success -> success, Failed -> failed
+      const stateMap = {
+        // 支持首字母大写格式（兼容）
+        'Pending': 'pending',
+        'Running': 'running',
+        'Success': 'success',
+        'Failed': 'failed',
+        'Skipped': 'skipped',
+        // 支持小写格式（实际后端发送的格式）
+        'pending': 'pending',
+        'running': 'running',
+        'success': 'success',
+        'failed': 'failed',
+        'skipped': 'skipped'
+      }
+      return stateMap[state] || 'running'
+    },
+    // 设置进度事件监听（只注册一次）
+    async setupProgressListener() {
+      if (!this._installProgressListener) {
+        const store = useInstallProgressStore()
+        this._installProgressListener = createInstallProgressListener({
+          store,
+          openInstallModal: () => {
+            this.isInstallModalOpen = true
+          },
+        })
+      }
+
+      await this._installProgressListener.start()
     },
     // 切换调试窗口显示（不修改调试状态）
     toggleDebugWindow() {

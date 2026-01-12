@@ -31,18 +31,20 @@ fn generate_stable_id_for_config(printer_name: &str, printer_path: &str) -> Stri
     match crate::load_local_config() {
         Ok((config, _)) => {
             // 在所有 areas 中查找匹配的 printer
-            for area in &config.areas {
-                for printer in &area.printers {
-                    if printer.name == printer_name || printer.path == printer_path {
-                        // 生成 hash
-                        let ip = printer_path.trim_start_matches("\\\\").trim_start_matches("\\").to_string();
-                        let hash_input = format!("{}|{}|{}", area.name, printer.name, ip);
-                        
-                        let mut hasher = DefaultHasher::new();
-                        hash_input.hash(&mut hasher);
-                        let hash = hasher.finish();
-                        
-                        return format!("{:x}", hash);
+            for city in &config.cities {
+                for area in &city.areas {
+                    for printer in &area.printers {
+                        if printer.name == printer_name || printer.path == printer_path {
+                            // 生成 hash
+                            let ip = printer_path.trim_start_matches("\\\\").trim_start_matches("\\").to_string();
+                            let hash_input = format!("{}|{}|{}", area.area_name, printer.name, ip);
+                            
+                            let mut hasher = DefaultHasher::new();
+                            hash_input.hash(&mut hasher);
+                            let hash = hasher.finish();
+                            
+                            return format!("{:x}", hash);
+                        }
                     }
                 }
             }
@@ -447,6 +449,7 @@ extern "system" {
 /// - `driverInstallStrategy`: 驱动安装策略
 #[allow(non_snake_case)]
 pub async fn reinstall_printer_windows(
+    app: tauri::AppHandle,  // 用于发送进度事件
     config_printer_key: String,
     config_printer_path: String,
     config_printer_name: String,
@@ -473,12 +476,16 @@ pub async fn reinstall_printer_windows(
             log::write_log(&format!("[ReinstallPrinter][#{}] CHECK_PHASE_START target_name={}", call_id, target_name));
             // 检测到同名打印机已存在，返回明确提示
             log::write_log(&format!("[ReinstallPrinter][#{}] CHECK_PHASE_FOUND target_name={}", call_id, target_name));
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+            let job_id = format!("reinstall_{}_{}", timestamp, (timestamp % 10000) as u32);
             return Ok(crate::InstallResult {
                 success: false,
                 message: format!("同名打印机 \"{}\" 已存在。为保证确定性，ePrinty 不提供应用内删除，请在系统设置中删除后重试。", target_name),
                 method: Some("Windows".to_string()),
                 stdout: None,
                 stderr: Some(format!("同名打印机已存在: {}", target_name)),
+                effective_dry_run: false, // 重装是真实操作
+                job_id,
             });
         }
         Err(e) => {
@@ -490,11 +497,13 @@ pub async fn reinstall_printer_windows(
     // 步骤 2: 重新安装打印机
     log::write_log(&format!("[ReinstallPrinter][#{}] INSTALL_PHASE_START", call_id));
     let install_result = crate::platform::windows::install::install_printer_windows(
+        app,  // 传入 app_handle（用于发送进度事件）
         config_printer_name.clone(),
         config_printer_path.clone(),
         driverPath.clone(),
         model.clone(),
         driverInstallStrategy.clone(),
+        None,  // driverKey: 重装时无 driverKey
         None,  // install_mode: 重装时使用默认值
         false  // dry_run: 重装时不使用 dryRun 模式
     ).await;
@@ -525,6 +534,8 @@ pub async fn reinstall_printer_windows(
                     method: result.method,
                     stdout: result.stdout,
                     stderr: result.stderr,
+                    effective_dry_run: result.effective_dry_run, // 从安装结果中获取
+                    job_id: result.job_id, // 从安装结果中获取
                 })
             } else {
                 let elapsed_ms = start_time.elapsed().as_millis();
@@ -535,18 +546,24 @@ pub async fn reinstall_printer_windows(
                     method: result.method,
                     stdout: result.stdout,
                     stderr: result.stderr,
+                    effective_dry_run: result.effective_dry_run, // 从安装结果中获取
+                    job_id: result.job_id, // 从安装结果中获取
                 })
             }
         }
         Err(e) => {
             let elapsed_ms = start_time.elapsed().as_millis();
             log::write_log(&format!("[ReinstallPrinter][#{}] INSTALL_PHASE_FAIL elapsed_ms={} error={}", call_id, elapsed_ms, e));
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+            let job_id = format!("reinstall_{}_{}", timestamp, (timestamp % 10000) as u32);
             Ok(crate::InstallResult {
                 success: false,
                 message: format!("重装失败: {}", e),
                 method: Some("Windows".to_string()),
                 stdout: None,
                 stderr: Some(e),
+                effective_dry_run: false, // 重装是真实操作
+                job_id,
             })
         }
     }

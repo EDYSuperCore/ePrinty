@@ -1,4 +1,7 @@
+pub mod archive;
 pub mod cmd;
+pub mod driver_bootstrap;
+pub mod driver_fetch;
 pub mod encoding;
 pub mod enum_printers;
 pub mod install;
@@ -8,6 +11,7 @@ pub mod open;
 pub mod powershell_install;
 pub mod ps;
 pub mod remove;
+pub mod step_reporter;
 pub mod test_page;
 
 // 注意：list 模块的函数通过完整路径访问，不需要在这里导出

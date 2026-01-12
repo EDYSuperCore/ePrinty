@@ -46,7 +46,7 @@ pub fn run_hidden(_program: &str, _args: &[&str]) -> Result<ExecOutput, String> 
 
 /// 执行外部命令（隐藏窗口，带超时，收集输出）
 #[cfg(windows)]
-pub fn run_hidden_with_timeout(program: &str, args: &[&str], timeout_secs: u64) -> Result<ExecOutput, String> {
+pub fn run_hidden_with_timeout(program: &str, args: &[&str], _timeout_secs: u64) -> Result<ExecOutput, String> {
     // 简单实现：使用同步 output，超时参数保留但不实现（由调用侧使用 tokio::timeout 处理）
     run_hidden(program, args)
 }

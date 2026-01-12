@@ -62,18 +62,20 @@ pub fn list_printers_detailed() -> Result<Vec<crate::platform::windows::list::De
 /// - macOS: 调用 macOS 实现
 #[allow(non_snake_case)]
 pub async fn install_printer(
+    app: tauri::AppHandle,  // 用于发送进度事件
     name: String,
     path: String,
     driverPath: Option<String>,
     model: Option<String>,
     driverInstallPolicy: Option<String>,  // 驱动安装策略："always" | "reuse_if_installed"
+    driverKey: Option<String>,  // v2.0.0+：驱动键（用于 meta 记录）
     installMode: Option<String>,  // 安装方式："auto" | "package" | "installer" | "ipp" | "legacy_inf"（使用 camelCase 匹配前端）
     dry_run: bool,  // 测试模式：true 表示仅模拟，不执行真实安装
 ) -> Result<crate::InstallResult, String> {
     #[cfg(windows)]
     {
         // Windows 平台：调用 Windows 实现
-        let result = crate::platform::windows::install::install_printer_windows(name, path, driverPath, model, driverInstallPolicy, installMode, dry_run).await?;
+        let result = crate::platform::windows::install::install_printer_windows(app, name, path, driverPath, model, driverInstallPolicy, driverKey, installMode, dry_run).await?;
         // 转换 InstallResult 类型（从 platform/windows/install::InstallResult 到 crate::InstallResult）
         Ok(crate::InstallResult {
             success: result.success,
@@ -81,6 +83,8 @@ pub async fn install_printer(
             method: result.method,
             stdout: result.stdout,
             stderr: result.stderr,
+            effective_dry_run: result.effective_dry_run, // 从平台结果中获取
+            job_id: result.job_id, // 传递 jobId 给前端
         })
     }
     
@@ -131,6 +135,7 @@ pub fn print_test_page(printer_name: String) -> Result<String, String> {
 /// - macOS: 调用 macOS 实现（暂未实现）
 #[allow(non_snake_case)]
 pub async fn reinstall_printer(
+    app: tauri::AppHandle,  // 用于发送进度事件
     config_printer_key: String,
     config_printer_path: String,
     config_printer_name: String,
@@ -144,6 +149,7 @@ pub async fn reinstall_printer(
     {
         // Windows 平台：调用 Windows 实现
         crate::platform::windows::remove::reinstall_printer_windows(
+            app,
             config_printer_key,
             config_printer_path,
             config_printer_name,

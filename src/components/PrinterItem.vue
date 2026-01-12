@@ -92,17 +92,26 @@
                     v-for="option in installModeOptions"
                     :key="option.value"
                     @click.stop="selectInstallMode(option.value)"
+                    :disabled="option.disabled"
                     :class="[
                       'w-full px-4 py-2 text-left text-sm transition-colors flex items-center justify-between',
-                      installMode === option.value
+                      option.disabled
+                        ? 'text-gray-400 cursor-not-allowed bg-gray-50'
+                        : installMode === option.value
                         ? 'bg-gray-100 text-gray-900 font-medium'
                         : 'text-gray-700 hover:bg-gray-50'
                     ]"
+                    :title="option.disabled ? option.hint : ''"
                   >
                     <span>{{ option.label }}</span>
-                    <svg v-if="installMode === option.value" class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                    </svg>
+                    <div class="flex items-center space-x-2">
+                      <span v-if="option.disabled" class="text-xs text-gray-400">
+                        {{ option.hint }}
+                      </span>
+                      <svg v-if="installMode === option.value && !option.disabled" class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                      </svg>
+                    </div>
                   </button>
                 </div>
               </div>
@@ -317,7 +326,7 @@ export default {
     installMode: {
       type: String,
       default: 'auto'
-    }
+    },
   },
   data() {
     return {
@@ -333,11 +342,22 @@ export default {
       },
       // 安装方式选项
       installModeOptions: [
-        { value: 'auto', label: '自动兼容（推荐）' },
-        { value: 'package', label: '驱动包安装（推荐）' },
-        { value: 'installer', label: '厂商安装程序' },
-        { value: 'ipp', label: '免驱打印（系统通用）' },
-        { value: 'legacy_inf', label: '传统 INF 安装（老型号）' }
+        { value: 'auto', label: '自动兼容（推荐）', disabled: false },
+        { value: 'package', label: '驱动包安装（推荐）', disabled: false },
+        { value: 'installer', label: '厂商安装程序', disabled: true, hint: '暂未开放' },
+        { value: 'ipp', label: '免驱打印（系统通用）', disabled: true, hint: '暂未开放' },
+        { value: 'legacy_inf', label: '传统 INF 安装（老型号）', disabled: true, hint: '暂未开放' }
+      ],
+      // 阶段顺序定义
+      phasesOrder: [
+        { key: 'download', label: '下载驱动包' },
+        { key: 'verify', label: '校验驱动包' },
+        { key: 'extract', label: '解压并合并' },
+        { key: 'stageDriver', label: '导入 DriverStore' },
+        { key: 'registerDriver', label: '注册打印驱动' },
+        { key: 'ensurePort', label: '创建/校验端口' },
+        { key: 'ensureQueue', label: '创建/校验队列' },
+        { key: 'finalVerify', label: '最终验证' }
       ]
     }
   },
@@ -379,6 +399,13 @@ export default {
       this.showInstallModeMenu = false
     },
     selectInstallMode(mode) {
+      // 检查是否是禁用项
+      const option = this.installModeOptions.find(opt => opt.value === mode)
+      if (option && option.disabled) {
+        console.warn(`[InstallMode] ${mode} is disabled, ignoring selection`)
+        return
+      }
+      
       this.closeInstallModeMenu()
       // 使用 nextTick 确保菜单关闭后再触发事件
       this.$nextTick(() => {
@@ -434,6 +461,41 @@ export default {
       this.$nextTick(() => {
         this.$emit('remove', this.printer)
       })
+    },
+    formatBytes(bytes) {
+      if (bytes === 0) return '0 B'
+      const k = 1024
+      const sizes = ['B', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+    },
+    // 获取下载百分比
+    getDownloadPercent(phase) {
+      if (!phase) return null
+      if (phase.percent !== null && phase.percent !== undefined) {
+        return phase.percent
+      }
+      if (phase.bytesDownloaded && phase.bytesTotal && phase.bytesTotal > 0) {
+        return Math.floor((phase.bytesDownloaded / phase.bytesTotal) * 100)
+      }
+      return null
+    },
+    // 判断是否应该显示该阶段
+    shouldShowPhase(phases, phaseKey) {
+      if (!phases || !phases[phaseKey]) return false
+      const phase = phases[phaseKey]
+      // 显示非 pending 状态的阶段，或者已经完成/失败的阶段
+      return phase.state !== 'pending' || phase.updatedAt > 0
+    },
+    // 获取阶段状态
+    getPhaseState(phases, phaseKey) {
+      if (!phases || !phases[phaseKey]) return 'pending'
+      return phases[phaseKey].state || 'pending'
+    },
+    // 获取阶段消息
+    getPhaseMessage(phases, phaseKey) {
+      if (!phases || !phases[phaseKey]) return null
+      return phases[phaseKey].message || null
     }
   },
   directives: {
