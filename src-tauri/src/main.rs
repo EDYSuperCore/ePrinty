@@ -1012,6 +1012,7 @@ fn list_printers_detailed() -> Result<Vec<crate::platform::windows::list::Detail
 }
 
 // 安装打印机（v2.0.0+ 使用 driverKey 从 driverCatalog 获取驱动规格）
+#[cfg(windows)]
 #[tauri::command]
 #[allow(non_snake_case)]
 async fn install_printer(
@@ -1135,6 +1136,65 @@ async fn install_printer(
         dry_run_value,
     )
     .await
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn install_printer(
+    app: tauri::AppHandle,
+    name: String, 
+    path: String, 
+    _driverKey: Option<String>,  // macOS MVP 不依赖 driverCatalog
+    _driverPath: Option<String>,
+    model: Option<String>,
+    _driverInstallPolicy: Option<String>,
+    installMode: Option<String>,  // 必须为 driverless
+    dryRun: Option<bool>  // 测试模式
+) -> Result<InstallResult, String> {
+    if name.trim().is_empty() {
+        return Err("打印机名称不能为空".to_string());
+    }
+    if path.trim().is_empty() {
+        return Err("打印机路径不能为空".to_string());
+    }
+
+    let requested_mode = installMode.clone().unwrap_or_default();
+    if requested_mode.to_lowercase() != "driverless" {
+        return Err("macOS 仅支持 installMode=\"driverless\"".to_string());
+    }
+
+    let dry_run_value = dryRun.unwrap_or(true);
+
+    crate::platform::install_printer(
+        app,
+        name,
+        path,
+        None,
+        model,
+        None,
+        None,
+        Some("driverless".to_string()),
+        dry_run_value,
+    )
+    .await
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn install_printer(
+    _app: tauri::AppHandle,
+    _name: String, 
+    _path: String, 
+    _driverKey: Option<String>,
+    _driverPath: Option<String>,
+    _model: Option<String>,
+    _driverInstallPolicy: Option<String>,
+    _installMode: Option<String>,
+    _dryRun: Option<bool>
+) -> Result<InstallResult, String> {
+    Err("当前仅支持 Windows 和 macOS 平台安装".to_string())
 }
 
 #[tauri::command]
@@ -1886,6 +1946,31 @@ fn main() {
             debug_fetch_driver_payload
         ])
         .setup(|app| {
+            // Windows 平台：设置窗口圆角策略
+            #[cfg(windows)]
+            {
+                use winapi::um::dwmapi::DwmSetWindowAttribute;
+                use winapi::shared::windef::HWND;
+                
+                // DWMWA_WINDOW_CORNER_PREFERENCE 常量（winapi crate 中未定义）
+                const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+                // DWMWCP_ROUND = 2 (系统级圆角)
+                const DWMWCP_ROUND: u32 = 2;
+                
+                if let Some(window) = app.get_window("main") {
+                    if let Ok(hwnd) = window.hwnd() {
+                        unsafe {
+                            DwmSetWindowAttribute(
+                                hwnd.0 as HWND,
+                                DWMWA_WINDOW_CORNER_PREFERENCE,
+                                &DWMWCP_ROUND as *const _ as *const _,
+                                std::mem::size_of::<u32>() as u32,
+                            );
+                        }
+                    }
+                }
+            }
+            
             // 启动后延迟 800ms 发送进度事件自检
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

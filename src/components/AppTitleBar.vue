@@ -250,8 +250,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-right: 20px;
-  padding-top:20px;
+  padding-right: 48px;  /* 增加右侧间距，让按钮往左移 */
   -webkit-app-region: no-drag;
   position: relative;
   z-index: 1;

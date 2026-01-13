@@ -54,7 +54,8 @@ function validateInstallMode(mode: string): void {
     'package',
     'installer',
     'ipp',
-    'legacy_inf'
+    'legacy_inf',
+    'driverless'
   ]
   
   if (!mode) {

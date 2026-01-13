@@ -1,5 +1,7 @@
 use std::process::Command;
 
+pub mod install;
+
 /// macOS 平台打开 URL
 /// 
 /// 使用 `open` 命令打开 URL

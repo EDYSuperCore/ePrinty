@@ -57,6 +57,7 @@
         "fullscreen": false,
         "resizable": true,
         "decorations": false,
+        "transparent": true,
         "title": "ePrinty - 让打印这件事，简单一点",
         "width": 900,
         "height": 700,

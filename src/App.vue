@@ -288,10 +288,10 @@
     <!-- 设置对话框 -->
     <div 
       v-if="showHelp" 
-      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm overflow-y-auto"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
       @click.self="showHelp = false"
     >
-      <div class="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 my-8 overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 overflow-hidden flex flex-col h-[600px]">
         <!-- 对话框标题 -->
         <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 relative z-10 flex-shrink-0">
           <div class="flex items-center justify-between">
@@ -1649,6 +1649,8 @@ export default {
       isDev: import.meta.env.DEV,
       // 进度监听器服务引用（用于避免重复注册）
       _installProgressListener: null,
+      // 窗口状态监听器引用
+      _windowStateUnlisten: null,
       // 安装弹窗状态管理
       isInstallModalOpen: false, // 安装弹窗是否打开
       showCloseConfirm: false, // 显示关闭确认对话框
@@ -1691,6 +1693,7 @@ export default {
       originalConsole: {}, // 保存原始的 console 方法
       showVersionUpdateDialog: false, // 显示版本更新对话框
       versionUpdateInfo: null, // 版本更新信息
+      isMaximized: false, // 窗口是否最大化
       driverInstallPolicy: 'always', // 驱动安装策略：'always' | 'reuse_if_installed'
       // 安装方式选择器状态（每台打印机独立保存）
       installModeByPrinter: {}, // key: printerKey (name__path), value: InstallMode
@@ -1810,6 +1813,9 @@ export default {
         // this.$refs.appFrame.focus()
       }
     })
+    
+    // 监听窗口最大化状态
+    this.setupWindowStateListener()
   },
   beforeUnmount() {
     this.restoreConsole()
@@ -1817,6 +1823,11 @@ export default {
     if (this._installProgressListener) {
       this._installProgressListener.stop()
       this._installProgressListener = null
+    }
+    // 清理窗口状态监听器
+    if (this._windowStateUnlisten) {
+      this._windowStateUnlisten()
+      this._windowStateUnlisten = null
     }
   },
   methods: {
@@ -2154,24 +2165,31 @@ export default {
             async handleInstall(printer) {
               // 获取当前选择的安装方式
               let installMode = this.getInstallMode(printer)
-              
-              // 校验安装方式，禁用项回退到推荐模式
-              const disabledModes = ['installer', 'ipp', 'legacy_inf']
-              if (disabledModes.includes(installMode)) {
-                console.warn(`[InstallMode] ${installMode} is disabled, fallback to package`)
-                installMode = 'package'
-                // 更新缓存
+
+              if (this.isMacPlatform()) {
+                // macOS MVP 仅支持 driverless
+                installMode = 'driverless'
                 const key = this.getPrinterKey(printer)
-                this.installModeByPrinter[key] = 'package'
-                // 提示用户
-                this.statusMessage = '该安装方式暂未开放，已切换到推荐模式'
-                this.statusType = 'info'
-                setTimeout(() => {
-                  if (this.statusMessage === '该安装方式暂未开放，已切换到推荐模式') {
-                    this.statusMessage = ''
-                    this.statusType = ''
-                  }
-                }, 3000)
+                this.installModeByPrinter[key] = 'driverless'
+              } else {
+                // 校验安装方式，禁用项回退到推荐模式
+                const disabledModes = ['installer', 'ipp', 'legacy_inf']
+                if (disabledModes.includes(installMode)) {
+                  console.warn(`[InstallMode] ${installMode} is disabled, fallback to package`)
+                  installMode = 'package'
+                  // 更新缓存
+                  const key = this.getPrinterKey(printer)
+                  this.installModeByPrinter[key] = 'package'
+                  // 提示用户
+                  this.statusMessage = '该安装方式暂未开放，已切换到推荐模式'
+                  this.statusType = 'info'
+                  setTimeout(() => {
+                    if (this.statusMessage === '该安装方式暂未开放，已切换到推荐模式') {
+                      this.statusMessage = ''
+                      this.statusType = ''
+                    }
+                  }, 3000)
+                }
               }
               
               // 获取打印机唯一标识 key
@@ -2685,8 +2703,15 @@ export default {
     closeDebugWindow() {
       this.showDebugWindow = false
     },
+    isMacPlatform() {
+      const platform = this.systemInfoStore.info?.platform || ''
+      return platform.toLowerCase() === 'macos'
+    },
     // 获取打印机的安装方式
     getInstallMode(printer) {
+      if (this.isMacPlatform()) {
+        return 'driverless'
+      }
       const key = this.getPrinterKey(printer)
       return this.installModeByPrinter[key] || 'auto'
     },
@@ -2711,13 +2736,14 @@ export default {
         'package': '驱动包安装（推荐）',
         'installer': '厂商安装程序',
         'ipp': '免驱打印（系统通用）',
-        'legacy_inf': '传统 INF 安装（老型号）'
+        'legacy_inf': '传统 INF 安装（老型号）',
+        'driverless': 'Driverless（IPP Everywhere）'
       }
       return INSTALL_MODE_LABEL[mode] || '自动兼容（推荐）'
     },
     // 验证安装方式是否有效
     isValidInstallMode(mode) {
-      const validModes = ['auto', 'package', 'installer', 'ipp', 'legacy_inf']
+      const validModes = ['auto', 'package', 'installer', 'ipp', 'legacy_inf', 'driverless']
       return validModes.includes(mode)
     },
     // 初始化安装方式默认值（从配置文件中读取）
@@ -2731,6 +2757,11 @@ export default {
         
         // 如果 Map 中已存在该 printerKey 的值，不做任何修改（尊重用户已选）
         if (this.installModeByPrinter[key]) {
+          return
+        }
+
+        if (this.isMacPlatform()) {
+          this.installModeByPrinter[key] = 'driverless'
           return
         }
         
@@ -3163,6 +3194,33 @@ export default {
       const seconds = String(date.getSeconds()).padStart(2, '0')
       const milliseconds = String(date.getMilliseconds()).padStart(3, '0')
       return `${hours}:${minutes}:${seconds}.${milliseconds}`
+    },
+    async setupWindowStateListener() {
+      try {
+        const { appWindow } = await import('@tauri-apps/api/window')
+        
+        // 初始化最大化状态
+        this.isMaximized = await appWindow.isMaximized()
+        this.updateWindowClass()
+        
+        // 监听窗口最大化/恢复事件
+        this._windowStateUnlisten = await appWindow.onResized(async () => {
+          this.isMaximized = await appWindow.isMaximized()
+          this.updateWindowClass()
+        })
+      } catch (err) {
+        console.warn('无法监听窗口状态:', err)
+      }
+    },
+    updateWindowClass() {
+      const appFrame = this.$refs.appFrame
+      if (!appFrame) return
+      
+      if (this.isMaximized) {
+        appFrame.classList.add('maximized')
+      } else {
+        appFrame.classList.remove('maximized')
+      }
     }
   }
 }

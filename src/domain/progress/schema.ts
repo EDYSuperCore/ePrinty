@@ -3,6 +3,7 @@ import type { InstallProgressEvent as EventType } from '../../models/installProg
 
 // 可展示步骤 ID（需与后端保持一致）
 export const DISPLAY_STEP_IDS = [
+  'device.probe',
   'driver.download',
   'driver.verify',
   'driver.extract',

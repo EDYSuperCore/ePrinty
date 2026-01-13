@@ -9,11 +9,13 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: transparent;  /* 透明背景，显示桌面 */
 }
 
 #app {
   height: 100vh;
   overflow: hidden;
+  background: transparent;  /* 透明背景 */
 }
 
 .app-shell {
@@ -23,7 +25,7 @@ body {
   overflow: hidden;
   position: relative;
   z-index: 1;
-  background: #ffffff;  /* 将背景色移到这里 */
+  background: transparent;  /* 透明背景，让圆角外侧透明 */
 }
 .app-content {
   flex: 1;
@@ -35,13 +37,22 @@ body {
   width: 100vw;
   position: relative;
 
+  background: #ffffff;             /* 内容区域白色背景 */
   border: 1px solid #b4b6b8;       /* 应用边框 */
+  border-radius: 8px;              /* 轻微圆角（Windows 11 风格）*/
 
   box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.04);  /* 应用阴影 */
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 12px 28px rgba(0, 0, 0, 0.12); /* 克制的双层阴影 */
 
   overflow: hidden;                /* 关键：裁剪圆角 */
+  transition: border-radius 0.2s ease, box-shadow 0.2s ease; /* 平滑过渡 */
+}
+
+/* 最大化状态：移除圆角和阴影 */
+.app-frame.maximized {
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* ============================================================================

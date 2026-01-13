@@ -24,7 +24,7 @@ walkdir = "2"
 url = "2.5"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi", "winspool", "winnt", "errhandlingapi"] }
+winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi", "winspool", "winnt", "errhandlingapi", "dwmapi"] }
 windows = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_SystemServices",

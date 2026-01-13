@@ -5,7 +5,7 @@
 import type { StepSnapshot, InstallJobSnapshot } from '../models/installProgress'
 
 // 安装模式类型
-export type InstallMode = 'auto' | 'package_only' | 'pnputil_only' | 'powershell_only' | 'inf_only'
+export type InstallMode = 'auto' | 'package_only' | 'pnputil_only' | 'powershell_only' | 'inf_only' | 'driverless'
 
 // 步骤计划类型
 export interface StepPlan {
@@ -26,6 +26,12 @@ export const STEP_PLANS_BY_MODE: Record<InstallMode, StepPlan[]> = {
     { stepId: 'device.ensurePort', label: '创建/校验端口', weight: 10 },
     { stepId: 'device.ensureQueue', label: '创建/校验队列', weight: 10 },
     { stepId: 'device.finalVerify', label: '最终验证', weight: 10 },
+  ],
+  // driverless 模式（macOS IPP Everywhere）
+  driverless: [
+    { stepId: 'device.probe', label: '检测打印机可用性', weight: 30 },
+    { stepId: 'device.ensureQueue', label: '创建打印队列', weight: 40 },
+    { stepId: 'device.finalVerify', label: '最终校验', weight: 30 },
   ],
   // package_only 模式：不含下载流程
   package_only: [
@@ -75,6 +81,10 @@ export function normalizeInstallMode(mode?: string | null): InstallMode {
   }
 
   const trimmed = mode.trim().toLowerCase()
+
+  if (trimmed === 'driverless') {
+    return 'driverless'
+  }
 
   // 兼容历史值和后端值 'package' -> 'package_only'
   if (trimmed === 'package') {

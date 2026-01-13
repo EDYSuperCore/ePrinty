@@ -90,11 +90,14 @@ pub async fn install_printer(
     
     #[cfg(target_os = "macos")]
     {
-        // macOS 平台：调用 macOS 实现
-        // 注意：macOS 安装实现尚未迁移到 platform/macos，暂时返回错误
-        // TODO: 当 macos::install_printer_macos 实现后，替换为：
-        // crate::platform::macos::install_printer_macos(name, path, driverPath, model).await
-        Err("macOS 平台暂不支持该功能".to_string())
+        crate::platform::macos::install::install_printer_macos(
+            app,
+            name,
+            path,
+            installMode,
+            dry_run,
+        )
+        .await
     }
     
     #[cfg(not(any(windows, target_os = "macos")))]
