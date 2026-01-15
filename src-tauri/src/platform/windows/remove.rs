@@ -3,6 +3,7 @@
 
 use super::log;
 use super::cmd;
+use super::DetailedPrinterInfo;
 
 /// 已安装的打印机信息（包含完整信息用于匹配）
 #[derive(Debug, Clone)]
@@ -314,7 +315,7 @@ pub fn resolve_target_printer(config_name: String, ip: Option<String>) -> Result
     log::write_log(&format!("[ResolveTarget] START config_name={} ip={:?}", config_name, ip));
     
     // 使用 list_printers_detailed 获取已安装的打印机列表
-    let installed_printers = match super::list::list_printers_detailed() {
+    let installed_printers: Vec<DetailedPrinterInfo> = match super::list::list_printers_detailed() {
         Ok(printers) => printers,
         Err(e) => {
             log::write_log(&format!("[ResolveTarget] 枚举打印机失败: {}", e));
@@ -323,7 +324,7 @@ pub fn resolve_target_printer(config_name: String, ip: Option<String>) -> Result
     };
     
     // 第一步：按名称精确匹配
-    let mut candidates: Vec<&super::list::DetailedPrinterInfo> = installed_printers.iter()
+    let mut candidates: Vec<&DetailedPrinterInfo> = installed_printers.iter()
         .filter(|p| p.name == config_name)
         .collect();
     
@@ -347,7 +348,7 @@ pub fn resolve_target_printer(config_name: String, ip: Option<String>) -> Result
         let ip_underscore = format!("IP_{}", ip_to_underscore(ip));
         
         // 优先匹配：port_name == "IP_<ip转下划线>" 或 port_name contains ip
-        let ip_matches: Vec<&super::list::DetailedPrinterInfo> = candidates.iter()
+        let ip_matches: Vec<&DetailedPrinterInfo> = candidates.iter()
             .filter(|p| {
                 if let Some(port) = &p.port_name {
                     port == &ip_underscore || port.contains(ip)
@@ -355,7 +356,7 @@ pub fn resolve_target_printer(config_name: String, ip: Option<String>) -> Result
                     false
                 }
             })
-            .copied()
+            .map(|p| *p)
             .collect();
         
         if !ip_matches.is_empty() {
