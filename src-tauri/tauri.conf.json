@@ -42,7 +42,8 @@
         "icons/icon.ico"
       ],
       "resources": [
-        "scripts/ricoh320.pdd"
+        "scripts/ricoh320.pdd",
+        "../printer_config.json"
       ],
       "copyright": "",
       "category": "Utility",

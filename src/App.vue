@@ -272,6 +272,19 @@
           ]">
             {{ statusMessage || '就绪' }}
           </span>
+          <!-- 配置刷新状态提示 -->
+          <span v-if="configLoadState.refreshing" class="text-xs text-gray-400 flex items-center space-x-1">
+            <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>正在刷新远程配置…</span>
+          </span>
+          <span v-else-if="configLoadState.lastRefreshError && configLoadState.initialSource" class="text-xs text-gray-400" title="远程配置不可用，已使用本地配置">
+            <svg class="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span class="ml-1">远程配置不可用</span>
+          </span>
         </div>
         <button
           @click="refresh"
@@ -405,15 +418,16 @@
             <!-- 高级选项 -->
             <div class="space-y-6">
 
-              <!-- 设置项 1：测试模式（dryRun） -->
-              <div class="border border-gray-200 rounded-lg p-4">
+              <!-- 设置项 1：测试模式（dryRun）- 仅调试模式显示 -->
+              <div v-if="shouldShowDryRun" class="border border-gray-200 rounded-lg p-4">
                 <div class="flex-1">
                   <div class="flex items-center space-x-2 mb-2">
-                    <h5 class="text-sm font-medium text-gray-900">测试模式（dryRun）</h5>
-                    <span class="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700 rounded">推荐</span>
+                    <h5 class="text-sm font-medium text-gray-900">测试模式（仅调试环境使用）</h5>
+                    <span class="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">调试</span>
                   </div>
                   <p class="text-xs text-gray-600 mb-3">
-                    开启后，安装流程将仅模拟执行，不会对系统进行任何真实修改。关闭后，将执行真实安装（当前版本尚未接入真实安装逻辑）。
+                    开启后，安装流程将仅模拟执行，不会对系统进行任何真实修改。关闭后，将执行真实安装。
+                    <strong class="text-red-600">此选项仅在调试模式下可用，不会真正安装打印机。</strong>
                   </p>
                   <label class="flex items-center space-x-2 cursor-pointer">
                     <input
@@ -422,7 +436,7 @@
                       @change="onDryRunChange"
                       class="w-4 h-4 text-blue-600 focus:ring-blue-500 rounded"
                     />
-                    <span class="text-sm text-gray-700">启用测试模式（默认开启）</span>
+                    <span class="text-sm text-gray-700">启用测试模式（仅调试环境使用，不会真正安装打印机）</span>
                   </label>
                 </div>
               </div>
@@ -1644,6 +1658,12 @@ export default {
       pendingRemoteConfig: null, // 待更新的远程配置
       localVersion: '', // 本地版本号
       remoteVersion: '', // 远程版本号
+      // 配置加载状态（SWR 策略）
+      configLoadState: {
+        initialSource: null, // "cache" | "local" | null
+        refreshing: false, // 是否正在刷新
+        lastRefreshError: null, // 最后一次刷新错误
+      },
       installingPrinters: new Set(), // 正在安装的打印机名称集合（统一管理安装状态）
       reinstallingPrinters: new Set(), // 正在重装的打印机名称集合
       showInstallProgress: false, // 显示安装进度对话框
@@ -1655,6 +1675,9 @@ export default {
       _printProgressUnlisten: null,
       // 窗口状态监听器引用
       _windowStateUnlisten: null,
+      // 配置更新事件监听器引用
+      _configUpdatedUnlisten: null,
+      _configRefreshFailedUnlisten: null,
       // 安装弹窗状态管理
       isInstallModalOpen: false, // 安装弹窗是否打开
       showCloseConfirm: false, // 显示关闭确认对话框
@@ -1701,8 +1724,8 @@ export default {
       driverInstallPolicy: 'always', // 驱动安装策略：'always' | 'reuse_if_installed'
       // 安装方式选择器状态（每台打印机独立保存）
       installModeByPrinter: {}, // key: printerKey (name__path), value: InstallMode
-      // 测试模式（dryRun）开关，默认开启
-      dryRun: true,
+      // 测试模式（dryRun）开关，默认关闭（仅调试模式可开启）
+      dryRun: false,
       // 作者的其他作品
       otherProducts: [
       {
@@ -1721,6 +1744,11 @@ export default {
     }
   },
   computed: {
+    // 是否应该显示 dryRun 开关（仅调试模式）
+    shouldShowDryRun() {
+      // 开发环境或调试按钮已显示（按了 Ctrl+Shift+D）
+      return this.isDev || this.showDebugButton
+    },
     // Store 相关计算属性
     installProgressStore() {
       return useInstallProgressStore()
@@ -1808,6 +1836,8 @@ export default {
     this.loadDryRunSetting()
     // 设置调试按钮显示功能
     this.setupDebugButtonToggle()
+    // 设置配置更新事件监听
+    this.setupConfigUpdateListener()
     // 设置进度事件监听
     this.setupProgressListener()
     // 设置打印测试页进度监听
@@ -1838,6 +1868,15 @@ export default {
     if (this._printProgressUnlisten) {
       this._printProgressUnlisten()
       this._printProgressUnlisten = null
+    }
+    // 清理配置更新事件监听器
+    if (this._configUpdatedUnlisten) {
+      this._configUpdatedUnlisten()
+      this._configUpdatedUnlisten = null
+    }
+    if (this._configRefreshFailedUnlisten) {
+      this._configRefreshFailedUnlisten()
+      this._configRefreshFailedUnlisten = null
     }
   },
   methods: {
@@ -2209,41 +2248,38 @@ export default {
       await this.startDetectInstalledPrinters()
     },
     async loadData() {
-      this.loading = true
-      this.error = null
-      this.statusMessage = '正在加载配置...'
-      this.statusType = 'info'
-
+      console.log('[UI_RENDER] 开始加载配置（SWR 策略）')
+      
+      // 步骤 1: 先读取缓存配置，立即渲染
       try {
-        // 只加载配置，不等待打印机列表检测
-        const configResult = await invoke('load_config').catch(err => {
-          console.error('加载配置失败:', err)
+        const cachedResult = await invoke('get_cached_config').catch(err => {
+          console.error('[CACHE_LOADED] 读取缓存失败:', err)
           throw err
         })
 
-        
-        // 检查配置结果是否有效
-        if (!configResult) {
-          throw new Error('配置加载失败：返回结果为空')
+        if (!cachedResult || !cachedResult.config) {
+          throw new Error('缓存配置为空')
         }
-        
-        if (!configResult.config) {
-          throw new Error('配置加载失败：配置数据为空')
-        }
-        
+
         // 【强制校验】cities 字段必须存在且非空
-        if (!configResult.config.cities || !Array.isArray(configResult.config.cities) || configResult.config.cities.length === 0) {
+        if (!cachedResult.config.cities || !Array.isArray(cachedResult.config.cities) || cachedResult.config.cities.length === 0) {
           throw new Error('配置文件缺少 cities 字段或为空。请升级 printer_config.json 为城市->办公区结构。\n\n参考格式：\n{\n  "cities": [{\n    "cityId": "beijing",\n    "cityName": "北京",\n    "areas": [...]\n  }]\n}')
         }
 
-        // 直接使用配置（不再进行任何 normalize/迁移）
-        this.config = configResult.config
+        // 记录初始来源
+        this.configLoadState.initialSource = cachedResult.source || 'cache'
+        console.log(`[CACHE_LOADED] 成功从 ${this.configLoadState.initialSource} 读取配置 version=${cachedResult.version || 'unknown'}`)
 
-        // 初始化打印机运行时状态（所有打印机初始为 detecting）
+        // 立即使用缓存配置渲染
+        this.config = cachedResult.config
+        this.loading = false
+        this.error = null
+
+        // 初始化打印机运行时状态
         this.loadInstalledKeyMap()
         this.initializePrinterRuntime()
         
-        // 初始化安装方式默认值（从配置文件中读取）
+        // 初始化安装方式默认值
         if (this.config && this.config.cities) {
           this.config.cities.forEach(city => {
             city.areas.forEach(area => {
@@ -2263,20 +2299,66 @@ export default {
             this.expandedCities.add(0) // 默认展开第一个城市
           }
         }
+
+        console.log('[UI_RENDER] 缓存配置已渲染，列表可见')
+
+        // 步骤 2: 后台刷新远程配置（fire-and-forget，不阻塞）
+        this.configLoadState.refreshing = true
+        this.configLoadState.lastRefreshError = null
         
-        // 如果不是首次加载（initialLoadingPrinters 为 false），立即设置 loading = false
-        // 首次加载时，initialLoadingPrinters 为 true，等待 mounted() 中统一控制
-        // 这样可以确保首次加载时办公区列表和打印机列表同时显示，刷新时立即显示
-        if (!this.initialLoadingPrinters) {
-          this.loading = false
-        }
+        // 不 await，后台执行
+        invoke('refresh_remote_config').then(refreshResult => {
+          console.log('[REMOTE_REFRESH_OK] 远程配置刷新成功')
+          this.configLoadState.refreshing = false
+          this.configLoadState.lastRefreshError = null
+          
+          // 显示轻提示（可选）
+          if (refreshResult && refreshResult.success) {
+            this.statusMessage = '配置已更新'
+            this.statusType = 'success'
+            // 3秒后清除提示
+            setTimeout(() => {
+              if (this.statusMessage === '配置已更新') {
+                this.statusMessage = ''
+              }
+            }, 3000)
+          }
+        }).catch(err => {
+          console.warn('[REMOTE_REFRESH_FAIL] 远程配置刷新失败:', err)
+          this.configLoadState.refreshing = false
+          this.configLoadState.lastRefreshError = err.toString() || err.message || '未知错误'
+          
+          // 只有在缓存为空时才显示错误（否则只记录日志）
+          if (this.configLoadState.initialSource === null) {
+            this.error = `远程配置加载失败: ${this.configLoadState.lastRefreshError}`
+            this.statusMessage = `远程配置不可用，已使用本地配置`
+            this.statusType = 'info'
+          } else {
+            // 有缓存时，只显示轻提示
+            this.statusMessage = '远程配置不可用，已使用本地配置'
+            this.statusType = 'info'
+            setTimeout(() => {
+              if (this.statusMessage === '远程配置不可用，已使用本地配置') {
+                this.statusMessage = ''
+              }
+            }, 3000)
+          }
+        })
+
       } catch (err) {
-        console.error('加载数据时发生错误:', err)
-        this.error = err.toString() || err.message || '未知错误'
-        this.statusMessage = `加载失败: ${this.error}`
-        this.statusType = 'error'
-        // 如果加载失败，立即设置 loading = false，显示错误信息
-        this.loading = false
+        console.error('[CACHE_LOADED] 缓存加载失败:', err)
+        
+        // 缓存加载失败，只有在缓存为空时才进入空态
+        if (!this.config || !this.config.cities || this.config.cities.length === 0) {
+          this.error = `配置加载失败: ${err.toString() || err.message || '未知错误'}。请检查网络/配置地址。`
+          this.statusMessage = this.error
+          this.statusType = 'error'
+          this.loading = false
+          this.configLoadState.initialSource = null
+        } else {
+          // 有缓存但读取失败，尝试后台刷新
+          console.warn('[CACHE_LOADED] 缓存读取失败，但已有配置，继续使用')
+        }
       }
     },
     async refresh() {
@@ -2317,13 +2399,21 @@ export default {
               // 获取打印机唯一标识 key
               const key = this.getPrinterKey(printer)
               
+              // 运行态保护：非调试模式下强制 dryRun = false
+              const isDebugMode = this.isDev || this.showDebugButton
+              const effectiveDryRun = isDebugMode ? this.dryRun : false
+              
+              if (!isDebugMode && this.dryRun) {
+                console.warn('[Safety] 非调试模式下强制 dryRun = false（原值: true）')
+              }
+              
               // [InstallClick] 打印安装方式
               console.log('[InstallClick]', { 
                 key,
                 name: printer.name,
                 mode: installMode,
                 configDefault: printer.install_mode || 'auto',
-                dryRun: this.dryRun
+                dryRun: effectiveDryRun
               })
               
               // 开始安装：添加到 installingPrinters Set
@@ -2357,6 +2447,7 @@ export default {
 
               try {
                 // 准备安装参数（新版 v2.0.0+ 使用 driverKey，不再传 driverPath）
+                // 注意：effectiveDryRun 已在上面计算（运行态保护）
                 const installRequest = {
                   name: printer.name,
                   path: printer.path,
@@ -2366,7 +2457,7 @@ export default {
                     : null,
                   driverInstallPolicy: this.driverInstallPolicy,
                   installMode: installMode, // 保持原值传给后端
-                  dryRun: this.dryRun
+                  dryRun: effectiveDryRun // 使用有效的 dryRun 值（非调试模式强制为 false）
                 }
                 
                 // 调用统一安装服务
@@ -2842,6 +2933,74 @@ export default {
       return stateMap[state] || 'running'
     },
     // 设置进度事件监听（只注册一次）
+    async setupConfigUpdateListener() {
+      // 监听配置更新事件
+      if (!this._configUpdatedUnlisten) {
+        try {
+          this._configUpdatedUnlisten = await listen('config_updated', (event) => {
+            console.log('[UI_RENDER] 收到 config_updated 事件')
+            const payload = event.payload
+            if (payload && payload.config) {
+              // 更新配置
+              this.config = payload.config
+              
+              // 重新初始化打印机运行时状态
+              this.loadInstalledKeyMap()
+              this.initializePrinterRuntime()
+              
+              // 重新初始化安装方式默认值
+              if (this.config && this.config.cities) {
+                this.config.cities.forEach(city => {
+                  city.areas.forEach(area => {
+                    if (area.printers) {
+                      this.initInstallModeDefaults(area.printers)
+                    }
+                  })
+                })
+              }
+              
+              // 显示更新提示
+              this.statusMessage = '配置已更新'
+              this.statusType = 'success'
+              setTimeout(() => {
+                if (this.statusMessage === '配置已更新') {
+                  this.statusMessage = ''
+                }
+              }, 3000)
+              
+              console.log('[UI_RENDER] 配置已热更新 version=', payload.version)
+            }
+          })
+        } catch (err) {
+          console.warn('[ConfigListener] 设置 config_updated 监听器失败:', err)
+        }
+      }
+      
+      // 监听配置刷新失败事件
+      if (!this._configRefreshFailedUnlisten) {
+        try {
+          this._configRefreshFailedUnlisten = await listen('config_refresh_failed', (event) => {
+            console.warn('[REMOTE_REFRESH_FAIL] 收到 config_refresh_failed 事件')
+            const payload = event.payload
+            if (payload && payload.error) {
+              this.configLoadState.lastRefreshError = payload.error
+              // 只有在有缓存的情况下才显示轻提示，否则已在 loadData 中处理
+              if (this.configLoadState.initialSource) {
+                this.statusMessage = '远程配置不可用，已使用本地配置'
+                this.statusType = 'info'
+                setTimeout(() => {
+                  if (this.statusMessage === '远程配置不可用，已使用本地配置') {
+                    this.statusMessage = ''
+                  }
+                }, 3000)
+              }
+            }
+          })
+        } catch (err) {
+          console.warn('[ConfigListener] 设置 config_refresh_failed 监听器失败:', err)
+        }
+      }
+    },
     async setupProgressListener() {
       if (!this._installProgressListener) {
         const store = useInstallProgressStore()
@@ -3258,23 +3417,45 @@ export default {
     loadDryRunSetting() {
       try {
         const saved = localStorage.getItem('eprinty_dry_run')
+        const isDebugMode = this.isDev || this.showDebugButton
+        
         if (saved !== null) {
-          this.dryRun = saved === 'true'
+          const savedValue = saved === 'true'
+          // 非调试模式下强制为 false
+          if (!isDebugMode && savedValue) {
+            console.warn('[Safety] dryRun 在非调试模式下被强制重置为 false（原值: true）')
+            this.dryRun = false
+            localStorage.setItem('eprinty_dry_run', 'false')
+          } else {
+            this.dryRun = savedValue
+          }
         } else {
-          // 默认值：true（安全策略）
-          this.dryRun = true
-          localStorage.setItem('eprinty_dry_run', 'true')
+          // 默认值：false（安全策略）
+          this.dryRun = false
+          localStorage.setItem('eprinty_dry_run', 'false')
         }
       } catch (err) {
         console.error('加载 dryRun 设置失败:', err)
-        this.dryRun = true // 默认值
+        this.dryRun = false // 默认值
       }
     },
     // dryRun 设置变更
     onDryRunChange() {
       try {
+        const isDebugMode = this.isDev || this.showDebugButton
+        if (!isDebugMode) {
+          // 非调试模式下强制为 false
+          console.warn('[Safety] 非调试模式下不允许启用 dryRun，已重置为 false')
+          this.dryRun = false
+        }
+        
         localStorage.setItem('eprinty_dry_run', this.dryRun.toString())
-        console.log('[Settings] dryRun 已更新:', this.dryRun)
+        
+        if (this.dryRun) {
+          console.log('[Safety] dryRun enabled (debug mode only)')
+        } else {
+          console.log('[Settings] dryRun 已更新:', this.dryRun)
+        }
       } catch (err) {
         console.error('保存 dryRun 设置失败:', err)
       }

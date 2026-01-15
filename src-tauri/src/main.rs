@@ -4,6 +4,9 @@
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+#[macro_use]
+extern crate serde_json;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::Manager;
@@ -271,6 +274,21 @@ struct LoadConfigResult {
     remote_version: Option<String>, // 远程版本号
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedConfigResult {
+    config: PrinterConfig,
+    source: String, // "cache" 或 "local"
+    timestamp: Option<u64>, // 缓存时间戳（Unix timestamp）
+    version: Option<String>, // 配置版本号
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RefreshConfigResult {
+    success: bool,
+    error: Option<String>,
+    version: Option<String>, // 更新后的版本号
+}
+
 /// 调试解压 ZIP 的返回结果（可序列化）
 #[derive(Debug, Serialize)]
 struct DebugExtractZipResponse {
@@ -411,9 +429,274 @@ pub fn validate_printer_config_v2(config: &PrinterConfig) -> Result<(), String> 
     Ok(())
 }
 
+// 获取本地配置目录（Application Support/config）
+fn get_local_config_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::api::path::app_data_dir;
+    
+    let app_data = app_data_dir(&app.config())
+        .ok_or_else(|| "无法获取应用数据目录".to_string())?;
+    
+    let config_dir = app_data.join("config");
+    
+    // 确保目录存在
+    fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("创建配置目录失败: {}", e))?;
+    
+    Ok(config_dir)
+}
+
+// 获取本地配置文件路径（唯一可写配置源）
+fn get_local_config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let config_dir = get_local_config_dir(app)?;
+    Ok(config_dir.join(CONFIG_FILE_NAME))
+}
+
+// 获取包内 seed 配置文件路径（只读）
+fn get_seed_config_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::api::path::resource_dir;
+    
+    // 尝试从资源目录解析 seed 配置文件
+    // 资源文件在打包后会被复制到 bundle 的 resources 目录
+    if let Some(resource_dir) = resource_dir(app.package_info(), &app.env()) {
+        // 尝试多个可能的文件名
+        let possible_names = ["printer_config.json", "default_printer_config.json"];
+        for name in &possible_names {
+            let seed_path = resource_dir.join(name);
+            if seed_path.exists() {
+                eprintln!("[CONFIG_SEED] 找到 seed 配置文件: {}", seed_path.display());
+                return Some(seed_path);
+            }
+        }
+    }
+    
+    // 兼容：如果资源目录中没有，尝试从可执行文件所在目录查找
+    // macOS: App.app/Contents/Resources/
+    // Windows/Linux: 可执行文件所在目录
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // macOS bundle 结构：App.app/Contents/MacOS/exe -> App.app/Contents/Resources/
+            #[cfg(target_os = "macos")]
+            {
+                if exe_dir.ends_with("MacOS") {
+                    if let Some(contents_dir) = exe_dir.parent() {
+                        let resources_dir = contents_dir.join("Resources");
+                        let possible_names = ["printer_config.json", "default_printer_config.json"];
+                        for name in &possible_names {
+                            let seed_path = resources_dir.join(name);
+                            if seed_path.exists() {
+                                eprintln!("[CONFIG_SEED] 找到 seed 配置文件 (macOS bundle): {}", seed_path.display());
+                                return Some(seed_path);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 其他平台或开发模式：直接在可执行文件目录查找
+            let possible_names = ["printer_config.json", "default_printer_config.json"];
+            for name in &possible_names {
+                let seed_path = exe_dir.join(name);
+                if seed_path.exists() {
+                    eprintln!("[CONFIG_SEED] 找到 seed 配置文件 (开发模式): {}", seed_path.display());
+                    return Some(seed_path);
+                }
+            }
+        }
+    }
+    
+    eprintln!("[CONFIG_SEED] 未找到 seed 配置文件");
+    None
+}
+
+// 从 seed 复制配置到本地（首次运行）
+fn seed_config_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
+    let local_config_path = get_local_config_path(app)?;
+    
+    // 如果本地配置已存在，不需要 seed
+    if local_config_path.exists() {
+        eprintln!("[CONFIG_SEEDED] 本地配置已存在，跳过 seed");
+        return Ok(());
+    }
+    
+    // 查找 seed 配置文件
+    let seed_path = get_seed_config_path(app)
+        .ok_or_else(|| "未找到 seed 配置文件".to_string())?;
+    
+    eprintln!("[CONFIG_SEEDED] 从 seed 复制配置: {} -> {}", 
+        seed_path.display(), local_config_path.display());
+    
+    // 读取 seed 配置
+    let seed_content = fs::read_to_string(&seed_path)
+        .map_err(|e| format!("读取 seed 配置文件失败: {}", e))?;
+    
+    // 验证 seed 配置格式
+    let _: PrinterConfig = serde_json::from_str(&seed_content)
+        .map_err(|e| format!("解析 seed 配置文件失败: {}", e))?;
+    
+    // 写入本地配置目录
+    fs::write(&local_config_path, seed_content)
+        .map_err(|e| format!("写入本地配置文件失败: {}", e))?;
+    
+    eprintln!("[CONFIG_SEEDED] 配置已从 seed 复制到本地");
+    Ok(())
+}
+
+// 获取缓存配置文件路径（Application Support 目录）- 保持向后兼容
+fn get_cache_config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    // 使用新的本地配置路径
+    get_local_config_path(app)
+}
+
+// 从缓存读取配置（只读，不进行网络请求）
+#[tauri::command]
+fn get_cached_config(app: tauri::AppHandle) -> Result<CachedConfigResult, String> {
+    eprintln!("[CACHE_LOADED] 开始读取缓存配置");
+    
+    // 步骤 1: 如果本地配置不存在，从 seed 复制
+    if let Err(e) = seed_config_if_needed(&app) {
+        eprintln!("[CACHE_LOADED] Seed 配置失败（可能首次运行且无 seed）: {}", e);
+        // 继续尝试读取，如果失败再报错
+    }
+    
+    // 步骤 2: 从本地配置路径读取（唯一可写配置源）
+    let local_config_path = get_local_config_path(&app)?;
+    
+    if !local_config_path.exists() {
+        return Err(format!("未找到本地配置文件: {}", local_config_path.display()));
+    }
+    
+    let content = fs::read_to_string(&local_config_path)
+        .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
+    
+    let config: PrinterConfig = serde_json::from_str(&content)
+        .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+    
+    // 验证配置完整性
+    validate_printer_config_v2(&config)?;
+    
+    // 获取文件修改时间作为时间戳
+    let timestamp = local_config_path.metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    
+    // 在移动 config 之前先克隆 version
+    let config_version = config.version.clone();
+    
+    eprintln!("[CONFIG_LOADED] source=local path={} version={:?}", 
+        local_config_path.display(), config_version);
+    
+    Ok(CachedConfigResult {
+        config,
+        source: "local".to_string(),
+        timestamp,
+        version: config_version,
+    })
+}
+
+// 刷新远程配置并更新缓存
+#[tauri::command]
+async fn refresh_remote_config(app: tauri::AppHandle) -> Result<RefreshConfigResult, String> {
+    eprintln!("[REMOTE_REFRESH_START] 开始刷新远程配置");
+    
+    // 使用超时（2000-3000ms）
+    let remote_result = tokio::time::timeout(
+        std::time::Duration::from_millis(3000),
+        load_remote_config()
+    ).await;
+    
+    match remote_result {
+        Ok(Ok(remote_config)) => {
+            let remote_version = remote_config.version.clone();
+            
+            // 保存到本地配置路径（使用原子写）
+            let local_config_path = get_local_config_path(&app)?;
+            match save_config_to_local(&remote_config, &local_config_path) {
+                Ok(_) => {
+                    eprintln!("[REMOTE_REFRESH_OK] 远程配置已更新到本地 version={:?} path={}", 
+                        remote_version, local_config_path.display());
+                    
+                    // 发送配置更新事件
+                    let payload = serde_json::json!({
+                        "version": remote_version,
+                        "config": remote_config,
+                    });
+                    
+                    if let Err(e) = app.emit_all("config_updated", payload) {
+                        eprintln!("[WARN] 发送 config_updated 事件失败: {}", e);
+                    }
+                    
+                    Ok(RefreshConfigResult {
+                        success: true,
+                        error: None,
+                        version: remote_version,
+                    })
+                }
+                Err(save_err) => {
+                    let error_msg = format!("保存缓存失败: {}", save_err);
+                    eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
+                    
+                    // 即使保存失败，也发送更新事件（配置已在内存中）
+                    let payload = serde_json::json!({
+                        "version": remote_version,
+                        "config": remote_config,
+                    });
+                    
+                    if let Err(e) = app.emit_all("config_updated", payload) {
+                        eprintln!("[WARN] 发送 config_updated 事件失败: {}", e);
+                    }
+                    
+                    Ok(RefreshConfigResult {
+                        success: true, // 虽然保存失败，但配置已加载
+                        error: Some(error_msg),
+                        version: remote_version,
+                    })
+                }
+            }
+        }
+        Ok(Err(e)) => {
+            let error_msg = format!("远程配置加载失败: {}", e);
+            eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
+            
+            // 发送刷新失败事件
+            let payload = serde_json::json!({
+                "error": error_msg.clone(),
+            });
+            
+            if let Err(emit_err) = app.emit_all("config_refresh_failed", payload) {
+                eprintln!("[WARN] 发送 config_refresh_failed 事件失败: {}", emit_err);
+            }
+            
+            Err(error_msg)
+        }
+        Err(_) => {
+            let error_msg = "远程配置加载超时".to_string();
+            eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
+            
+            // 发送刷新失败事件
+            let payload = serde_json::json!({
+                "error": error_msg.clone(),
+            });
+            
+            if let Err(emit_err) = app.emit_all("config_refresh_failed", payload) {
+                eprintln!("[WARN] 发送 config_refresh_failed 事件失败: {}", emit_err);
+            }
+            
+            Err(error_msg)
+        }
+    }
+}
+
 // 加载本地配置文件，返回配置和文件路径
+// 注意：此函数需要 AppHandle 来获取正确的本地配置路径
+// 为了保持向后兼容，保留此函数但优先使用 get_cached_config
 pub fn load_local_config() -> Result<(PrinterConfig, std::path::PathBuf), String> {
     use std::path::PathBuf;
+    
+    // 优先：尝试从 Application Support/config 读取（生产环境）
+    // 注意：此函数没有 AppHandle，无法直接获取 app_data_dir
+    // 因此回退到旧的搜索逻辑（主要用于开发模式）
     
     // 尝试从多个可能的位置加载本地配置
     // 优先级：1. 可执行文件所在目录（应用目录）- 最高优先级
@@ -560,7 +843,7 @@ pub fn resolve_effective_driver_spec(
     }
 }
 
-// 保存配置到本地文件
+// 保存配置到本地文件（使用原子写：temp -> rename）
 fn save_config_to_local(config: &PrinterConfig, config_path: &std::path::Path) -> Result<(), String> {
     use std::io::Write;
     
@@ -573,15 +856,34 @@ fn save_config_to_local(config: &PrinterConfig, config_path: &std::path::Path) -
             .map_err(|e| format!("创建目录失败: {}", e))?;
     }
     
-    // 写入文件
-    let mut file = fs::File::create(config_path)
-        .map_err(|e| format!("创建配置文件失败: {}", e))?;
+    // 原子写：先写入临时文件，然后重命名
+    let temp_path = config_path.with_extension("json.tmp");
     
-    file.write_all(json_content.as_bytes())
-        .map_err(|e| format!("写入配置文件失败: {}", e))?;
+    // 写入临时文件
+    {
+        let mut file = fs::File::create(&temp_path)
+            .map_err(|e| format!("创建临时配置文件失败: {}", e))?;
+        
+        file.write_all(json_content.as_bytes())
+            .map_err(|e| format!("写入临时配置文件失败: {}", e))?;
+        
+        file.sync_all()
+            .map_err(|e| format!("同步临时文件失败: {}", e))?;
+    }
     
-    file.sync_all()
-        .map_err(|e| format!("同步文件失败: {}", e))?;
+    // 原子重命名（在大多数文件系统上是原子操作）
+    fs::rename(&temp_path, config_path)
+        .map_err(|e| format!("重命名临时文件失败: {}", e))?;
+    
+    // macOS/Linux: 确保目录同步（Windows 上 rename 已经同步）
+    #[cfg(not(windows))]
+    {
+        if let Some(parent) = config_path.parent() {
+            if let Ok(parent_file) = fs::File::open(parent) {
+                let _ = parent_file.sync_all();
+            }
+        }
+    }
     
     Ok(())
 }
@@ -630,10 +932,29 @@ fn config_different(local: &PrinterConfig, remote: &PrinterConfig) -> bool {
 
 // 加载打印机配置（默认加载本地，后台检查远程更新）
 // 当本地配置存在时：立即返回，不等待远程请求；远程检查在后台执行并通过事件通知
+// 注意：此函数保持向后兼容，但推荐使用 get_cached_config + refresh_remote_config
 #[tauri::command]
 async fn load_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> {
-    // 优先加载本地配置
-    match load_local_config() {
+    // 优先加载本地配置（使用新的本地配置路径）
+    // 如果本地配置不存在，尝试从 seed 复制
+    if let Err(e) = seed_config_if_needed(&app) {
+        eprintln!("[load_config] Seed 配置失败: {}", e);
+    }
+    
+    let local_config_path = get_local_config_path(&app)?;
+    let load_result = if local_config_path.exists() {
+        let content = fs::read_to_string(&local_config_path)
+            .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
+        let config: PrinterConfig = serde_json::from_str(&content)
+            .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+        validate_printer_config_v2(&config)?;
+        Ok((config, local_config_path))
+    } else {
+        // 回退到旧的 load_local_config（开发模式兼容）
+        load_local_config()
+    };
+    
+    match load_result {
         Ok((local_config, _config_path)) => {
             let local_version = local_config.version.clone();
             
@@ -725,16 +1046,8 @@ async fn load_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> 
                 Ok(Ok(remote_config)) => {
                     let remote_version = remote_config.version.clone();
                     
-                    // 远程配置加载成功，尝试保存到本地（使用可执行文件所在目录）
-                    let save_path = if let Ok(exe_path) = std::env::current_exe() {
-                        if let Some(exe_dir) = exe_path.parent() {
-                            exe_dir.join(CONFIG_FILE_NAME)
-                        } else {
-                            std::path::PathBuf::from(CONFIG_FILE_NAME)
-                        }
-                    } else {
-                        std::path::PathBuf::from(CONFIG_FILE_NAME)
-                    };
+                    // 远程配置加载成功，保存到本地配置路径
+                    let save_path = get_local_config_path(&app)?;
                     
                     // 尝试保存远程配置到本地（可选，失败不影响使用）
                     let remote_error = match save_config_to_local(&remote_config, &save_path) {
@@ -773,10 +1086,23 @@ async fn load_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> 
 
 // 确认更新配置（保存远程配置到本地）
 #[tauri::command]
-async fn confirm_update_config() -> Result<LoadConfigResult, String> {
+async fn confirm_update_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> {
     // 重新加载本地配置和远程配置
-    match load_local_config() {
-        Ok((local_config, config_path)) => {
+    let local_config_path = get_local_config_path(&app)?;
+    let load_result = if local_config_path.exists() {
+        let content = fs::read_to_string(&local_config_path)
+            .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
+        let config: PrinterConfig = serde_json::from_str(&content)
+            .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+        validate_printer_config_v2(&config)?;
+        Ok((config, local_config_path))
+    } else {
+        // 回退到旧的 load_local_config（开发模式兼容）
+        load_local_config()
+    };
+    
+    match load_result {
+        Ok((local_config, local_config_path)) => {
             let local_version = local_config.version.clone();
             
             // 加载远程配置
@@ -789,8 +1115,8 @@ async fn confirm_update_config() -> Result<LoadConfigResult, String> {
                 Ok(Ok(remote_config)) => {
                     let remote_version = remote_config.version.clone();
                     
-                    // 保存远程配置到本地
-                    match save_config_to_local(&remote_config, &config_path) {
+                    // 保存远程配置到本地（使用原子写）
+                    match save_config_to_local(&remote_config, &local_config_path) {
                         Ok(_) => {
                             eprintln!("[INFO] 已确认更新，远程配置已保存到本地");
                             
@@ -1965,6 +2291,8 @@ fn main() {
     let result = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             load_config,
+            get_cached_config,
+            refresh_remote_config,
             list_printers,
             list_printers_detailed,
             install_printer,

@@ -1,71 +1,110 @@
 {
-  "version": "2.0.0",
+  "version": "2.4.0",
   "driverCatalog": {
-    "HP_M227_WIN_X64": {
-      "displayName": "HP LaserJet MFP M227-M231 PCL-6 (V4)",
-      "vendor": "HP",
-      "installMode": "package",
-      "local": {
-        "infRel": "drivers/HP 227/hpsw642a4_x64.inf",
-        "driverNames": ["HP LaserJet MFP M227-M231 PCL-6 (V4)"]
-      },
-      "notes": "HP M227 series driver - used by 3 printers in Beijing office"
-    },
     "HP_M154_WIN_X64": {
-      "displayName": "HP ColorLaserJet M153-M154 PCL 6 (V3)",
-      "vendor": "HP",
       "installMode": "package",
       "local": {
         "infRel": "drivers/M154nw/hpniae2a_x64.inf",
-        "driverNames": ["HP ColorLaserJet M153-M154 PCL 6 (V3)"]
+        "driverNames": [
+          "HP ColorLaserJet M153-M154 PCL 6 (V3)"
+        ]
       },
-      "notes": "HP M154 color printer driver"
+      "remote": {
+        "url": "https://ai.edianyun.icu/drivers/M154nw.zip",
+        "sha256": "2B3A3533922E9542F6053610DA6F9984496291F0E6929BB1B10B7E00DBDB4C08",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
     },
     "HP_M233_WIN_X64": {
-      "displayName": "HP LaserJet MFP M232-M237 PCLmS",
-      "vendor": "HP",
       "installMode": "package",
       "local": {
         "infRel": "drivers/HP 233/Driver/hpypclms32.inf",
-        "driverNames": ["HP LaserJet MFP M232-M237 PCLmS"]
+        "driverNames": [
+          "HP LaserJet MFP M232-M237 PCLmS"
+        ]
       },
-      "notes": "HP M233 series driver - used by 2 printers"
+      "remote": {
+        "url": "https://ai.edianyun.icu/drivers/HP 233.zip",
+        "sha256": "b67d075116b5fa9deceed1e01213e65cdbbda5a9d299398f1bf8ba28db170e81",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
+    },
+    "HP_M227_WIN_X64": {
+      "installMode": "package",
+      "local": {
+        "infRel": "drivers/HP 227/hpsw642a4_x64.inf",
+        "driverNames": [
+          "HP LaserJet MFP M227-M231 PCL-6 (V4)"
+        ]
+      },
+      "remote": {
+        "url": "https://ai.edianyun.icu/drivers/HP 227.zip",
+        "sha256": "493e67ac01ed68054baba7d52468c72c4384ef796c17e0fea06646d04806c9cb",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
     },
     "HP_M775_WIN_X64": {
-      "displayName": "HP LaserJet 700 color MFP M775 PCL 6",
-      "vendor": "HP",
       "installMode": "package",
       "local": {
         "infRel": "drivers/M775/hpcm775c.inf",
-        "driverNames": ["HP LaserJet 700 color MFP M775 PCL 6"]
+        "driverNames": [
+          "HP LaserJet 700 color MFP M775 PCL 6"
+        ]
       },
-      "notes": "HP M775 color MFP driver"
+      "remote": {
+        "url": "https://ai.edianyun.icu/drivers/M775.zip",
+        "sha256": "674472f444f520337f77faa4ac05336cb02bcfe084e41506fd52637affde49fa",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
     },
     "HP_M128_WIN_X64": {
-      "displayName": "HP LaserJet Pro MFP M127-M128 PCLmS",
-      "vendor": "HP",
       "installMode": "package",
       "local": {
         "infRel": "drivers/M128/hppasc_lj127128.inf",
-        "driverNames": ["HP LaserJet Pro MFP M127-M128 PCLmS"]
+        "driverNames": [
+          "HP LaserJet Pro MFP M127-M128 PCLmS"
+        ]
       },
-      "notes": "HP M128 series driver"
+      "remote": {
+        "url": "https://ai.edianyun.icu/drivers/M128.zip",
+        "sha256": "c2c49f9f9ff8d44446a819ee2bf76194217adf2bf17ad0f5394519bf3655c543",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
     },
     "EPSON_WFC5790_WIN_X64": {
-      "displayName": "EPSON WF-C5790",
-      "vendor": "EPSON",
       "installMode": "package",
       "local": {
         "infRel": "WFC5790_x64_2120W/WINX64/E_WF1SGE.INF",
-        "driverNames": ["EPSON WF-C5790 Series"]
+        "driverNames": [
+          "EPSON WF-C5790 Series"
+        ]
       },
       "remote": {
-        "url": "http://192.168.2.200:8080/WFC5790_x64_2120W.zip",
-        "sha256": "32C9A770396EC36F71DDBEAF2EAB6514C8BD72B82C44E23A72E0B0E81DA4ED1E",
+        "url": "https://ai.edianyun.icu/drivers/WFC5790_x64_2120W.zip",
+        "sha256": "977a27fff73d177d6bd2c1eff6e2205ef95aa912a83d2e4554063f2d1b635a76",
         "version": "2026.01.10",
         "layout": "drivers_root"
+      }
+    },
+    "iR-ADV_C3926_WIN_X64": {
+      "installMode": "package",
+      "local": {
+        "infRel": "GPlus_PCL6_Driver_V331_W64_00/Driver/CNP60MA64.INF",
+        "driverNames": [
+          "EPSON WF-C5790 Series"
+        ]
       },
-      "notes": "EPSON WF-C5790 with remote package support"
+     "remote": {
+        "url": "https://ai.edianyun.icu/drivers/iR-ADV_C3926_WIN_X64.zip",
+        "sha256": "ADB64C36F023D8F63049E67811CA5D06043E1233A4F7DCBB5B3251CB2E055289",
+        "version": "2026.01.10",
+        "layout": "drivers_root"
+      }
     }
   },
   "cities": [
@@ -80,36 +119,42 @@
               "name": "大厦A座一楼 前台",
               "path": "\\\\192.168.20.11",
               "model": "HP LaserJet MFP M227fdw",
+              "driver_names": null,
               "driverKey": "HP_M227_WIN_X64"
             },
             {
               "name": "大厦A座一楼 前台彩色打印",
               "path": "\\\\192.168.20.65",
               "model": "HP LaserJet MFP M154nw",
+              "driver_names": null,
               "driverKey": "HP_M154_WIN_X64"
             },
             {
               "name": "大厦A座一楼 财务",
               "path": "\\\\192.168.20.15",
               "model": "HP LaserJet MFP M233sdw",
+              "driver_names": null,
               "driverKey": "HP_M233_WIN_X64"
             },
             {
               "name": "大厦A座一楼 SSC打印机",
               "path": "\\\\192.168.14.32",
               "model": "HP LaserJet MFP M227fdw",
+              "driver_names": null,
               "driverKey": "HP_M227_WIN_X64"
             },
             {
               "name": "大厦A座一楼 财务大打印机",
-              "path": "\\\\192.168.20.35",
-              "model": "HP LaserJet 700 color MFP M775",
-              "driverKey": "HP_M775_WIN_X64"
+              "path": "\\\\192.168.20.37",
+              "model": "Canon Generic Plus PCL6",
+              "driver_names": null,
+              "driverKey": "iR-ADV_C3926_WIN_X64"
             },
             {
               "name": "大厦A座一楼 客户服务中心",
               "path": "\\\\192.168.14.30",
               "model": "HP LaserJet MFP M128fw",
+              "driver_names": null,
               "driverKey": "HP_M128_WIN_X64"
             }
           ]
@@ -121,6 +166,7 @@
               "name": "大厦A座二楼 销售",
               "path": "\\\\192.168.63.7",
               "model": "HP LaserJet MFP M233sdw",
+              "driver_names": null,
               "driverKey": "HP_M233_WIN_X64"
             }
           ]
@@ -132,6 +178,7 @@
               "name": "大厦A座三楼 打印机",
               "path": "\\\\192.168.86.2",
               "model": "HP LaserJet MFP M227fdw",
+              "driver_names": null,
               "driverKey": "HP_M227_WIN_X64"
             }
           ]
@@ -143,6 +190,7 @@
               "name": "大厦B座一楼 打印机",
               "path": "\\\\192.168.20.5",
               "model": "EPSON WF-C5790",
+              "driver_names": null,
               "driverKey": "EPSON_WFC5790_WIN_X64"
             }
           ]
