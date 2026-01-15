@@ -1,5 +1,5 @@
 <template>
-<div class="app-frame" @keydown="handleGlobalKeyDown" tabindex="-1" ref="appFrame">
+<div class="app-frame" :class="{ 'is-macos': isMacOS }" @keydown="handleGlobalKeyDown" tabindex="-1" ref="appFrame">
   <div class="app-shell">
 <AppTitleBar>
   <template #actions>
@@ -1330,7 +1330,7 @@
         <div class="px-6 py-6">
           <div class="mb-4">
             <p class="text-sm text-gray-700 mb-2">
-              <span class="font-medium">打印机:</span> {{ installProgress.printerName }}
+              <span class="font-medium">打印机:</span> {{ activeJob?.printerName || '-' }}
             </p>
             <p v-if="testPageResult.message" :class="[
               'text-sm',
@@ -1595,6 +1595,7 @@
 
 <script>
 import { invoke } from '@tauri-apps/api/tauri'
+import { listen } from '@tauri-apps/api/event'
 import PrinterItem from './components/PrinterItem.vue'
 import AppTitleBar from "./components/AppTitleBar.vue"
 import { useInstallProgressStore } from './stores/installProgress'
@@ -1611,6 +1612,7 @@ export default {
   },
   data() {
     return {
+      isMacOS: navigator.userAgent.includes('Mac OS X'),
       loading: false,
       error: null,
       config: null,
@@ -1647,8 +1649,10 @@ export default {
       showInstallProgress: false, // 显示安装进度对话框
       // 开发模式标志
       isDev: import.meta.env.DEV,
+      installedKeyMap: {},
       // 进度监听器服务引用（用于避免重复注册）
       _installProgressListener: null,
+      _printProgressUnlisten: null,
       // 窗口状态监听器引用
       _windowStateUnlisten: null,
       // 安装弹窗状态管理
@@ -1806,6 +1810,8 @@ export default {
     this.setupDebugButtonToggle()
     // 设置进度事件监听
     this.setupProgressListener()
+    // 设置打印测试页进度监听
+    this.setupPrintProgressListener()
     // 确保根元素可以获得焦点（用于接收键盘事件）
     this.$nextTick(() => {
       if (this.$refs.appFrame) {
@@ -1828,6 +1834,10 @@ export default {
     if (this._windowStateUnlisten) {
       this._windowStateUnlisten()
       this._windowStateUnlisten = null
+    }
+    if (this._printProgressUnlisten) {
+      this._printProgressUnlisten()
+      this._printProgressUnlisten = null
     }
   },
   methods: {
@@ -1879,17 +1889,40 @@ export default {
         this.startDetectInstalledPrinters()
       }
     },
+    // 打印机名称规范化（用于匹配）
+    normalizePrinterName(name) {
+      return name
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ') // 多个空格合并为一个
+        .replace(/\u3000/g, ' ') // 全角空格转半角空格
+    },
+    // 鲁棒的打印机名称匹配
+    printerNameMatches(configName, installedName) {
+      const normalized1 = this.normalizePrinterName(configName)
+      const normalized2 = this.normalizePrinterName(installedName)
+      
+      // 优先级 A: 精确匹配
+      if (normalized1 === normalized2) {
+        return true
+      }
+      
+      // 优先级 B: 包含匹配（两个方向都尝试）
+      if (normalized1.includes(normalized2) || normalized2.includes(normalized1)) {
+        return true
+      }
+      
+      return false
+    },
     // 检查打印机是否已安装（兼容旧逻辑，但优先使用 detectState）
     isInstalled(printerName) {
       // 优先使用新的 detectState
       if (this.printerRuntime[printerName]) {
         return this.printerRuntime[printerName].detectState === 'installed'
       }
-      // 降级到旧逻辑（兼容）
+      // 降级到旧逻辑（兼容，使用新的鲁棒匹配）
       return this.installedPrinters.some(name => 
-        name === printerName || 
-        name.includes(printerName) ||
-        printerName.includes(name)
+        this.printerNameMatches(printerName, name)
       )
     },
     // 获取打印机的检测状态
@@ -1909,7 +1942,12 @@ export default {
               area.printers.forEach(printer => {
                 // Vue 3 中直接赋值即可，不需要 $set
                 this.printerRuntime[printer.name] = {
-                  detectState: 'detecting'
+                  detectState: 'detecting',
+                  installedKey: this.installedKeyMap[printer.name] || null,
+                  systemQueueName: null,
+                  deviceUri: null,
+                  platform: null,
+                  displayName: null,
                 }
               })
             }
@@ -1954,6 +1992,7 @@ export default {
         try {
           // 调用后端接口（带超时机制）
           console.log(`[PrinterDetect][Frontend] INVOKE_START detect_id=${detectId} attempt=${attempt}`)
+          console.log(`[PrinterDetect][Frontend] INVOKE_CALL cmd=list_printers`)
           const detectPromise = invoke('list_printers')
           
           const timeoutPromise = new Promise((resolve) => {
@@ -2003,33 +2042,103 @@ export default {
             }
           } else if (Array.isArray(result)) {
             // 成功返回：更新每个打印机的检测状态
-            console.log(`[PrinterDetect][Frontend] INVOKE_RESOLVE detect_id=${detectId} attempt=${attempt} result_length=${result.length} elapsed_ms=${attemptElapsed.toFixed(2)}`)
+            const sample = result.length > 0 ? JSON.stringify(result[0]).slice(0, 200) : 'null'
+            console.log(`[PrinterDetect][Frontend] INVOKE_RESOLVE detect_id=${detectId} attempt=${attempt} is_array=${Array.isArray(result)} result_length=${result.length} sample=${sample} elapsed_ms=${attemptElapsed.toFixed(2)}`)
             
             this.printerDetect.status = 'idle'
-            const installedNames = result
+            const installedEntries = result.map(item => {
+              if (typeof item === 'string') {
+                return {
+                  installedKey: item,
+                  systemQueueName: item,
+                  displayName: item,
+                  deviceUri: null,
+                  platform: 'unknown',
+                }
+              }
+              return {
+                installedKey: item.installedKey || item.systemQueueName || item.name || '',
+                systemQueueName: item.systemQueueName || item.installedKey || item.name || '',
+                displayName: item.displayName || item.name || null,
+                deviceUri: item.deviceUri || null,
+                platform: item.platform || 'unknown',
+              }
+            }).filter(entry => entry.installedKey)
+
+            const installedNames = installedEntries.map(entry =>
+              entry.displayName || entry.systemQueueName || entry.installedKey
+            )
             const totalElapsed = performance.now() - detectStartTime
             
             // 更新 installedPrinters（用于兼容）
             this.installedPrinters = installedNames
             
-            // 更新每个打印机的 detectState
-            let installedCount = 0
-            let notInstalledCount = 0
-            Object.keys(this.printerRuntime).forEach(printerName => {
-              const isInstalled = installedNames.some(name => 
-                name === printerName || 
-                name.includes(printerName) ||
-                printerName.includes(name)
-              )
-              this.printerRuntime[printerName].detectState = isInstalled ? 'installed' : 'not_installed'
-              if (isInstalled) {
-                installedCount++
-              } else {
-                notInstalledCount++
-              }
-            })
+            // 如果列表为空，判断是"系统无打印机"还是"检测失败"
+            // 由于后端已经区分（返回空数组 = EMPTY，返回错误 = ERROR），这里安全处理
+            if (installedNames.length === 0) {
+              console.log(`[PrinterDetect][Frontend] DETECT_EMPTY: 系统未安装任何打印机`)
+              // 将所有 detecting 状态置为 'empty'（系统无打印机）
+              Object.keys(this.printerRuntime).forEach(printerName => {
+                if (this.printerRuntime[printerName].detectState === 'detecting') {
+                  this.printerRuntime[printerName].detectState = 'empty'
+                }
+              })
+            } else {
+              // 更新每个打印机的 detectState
+              let installedCount = 0
+              let notInstalledCount = 0
+              Object.keys(this.printerRuntime).forEach(printerName => {
+                const logicalInstalledKey = this.printerRuntime[printerName].installedKey
+                let matchedEntry = null
+                if (logicalInstalledKey) {
+                  matchedEntry = installedEntries.find(entry => entry.installedKey === logicalInstalledKey) || null
+                }
+                if (!matchedEntry) {
+                  matchedEntry = installedEntries.find(entry => {
+                    const matchName = entry.systemQueueName || entry.installedKey
+                    return this.printerNameMatches(printerName, matchName)
+                  }) || null
+                }
+                if (!matchedEntry) {
+                  const printerConfig = this.findPrinterConfigByName(printerName)
+                  const desiredUri = this.buildDeviceUriFromPath(printerConfig?.path || '')
+                  if (desiredUri) {
+                    matchedEntry = installedEntries.find(entry => {
+                      const systemUri = this.normalizeDeviceUri(entry.deviceUri)
+                      return systemUri && systemUri === desiredUri
+                    }) || null
+                    if (matchedEntry) {
+                      console.log(
+                        `[PrinterDetect][Frontend] MATCH_BY_URI printer="${printerName}" desiredUri="${desiredUri}" systemInstalledKey="${matchedEntry.installedKey}"`
+                      )
+                    }
+                  }
+                }
+                const isInstalled = Boolean(matchedEntry)
+                this.printerRuntime[printerName].detectState = isInstalled ? 'installed' : 'not_installed'
+                if (isInstalled) {
+                  this.printerRuntime[printerName].installedKey = matchedEntry.installedKey
+                  this.printerRuntime[printerName].systemQueueName = matchedEntry.systemQueueName
+                  this.printerRuntime[printerName].deviceUri = matchedEntry.deviceUri
+                  this.printerRuntime[printerName].platform = matchedEntry.platform
+                  this.printerRuntime[printerName].displayName = matchedEntry.displayName
+                  installedCount++
+                  if (matchedEntry.installedKey) {
+                    this.setInstalledKeyForPrinter(printerName, matchedEntry.installedKey)
+                  }
+                } else {
+                  this.printerRuntime[printerName].installedKey = null
+                  this.printerRuntime[printerName].systemQueueName = null
+                  this.printerRuntime[printerName].deviceUri = null
+                  this.printerRuntime[printerName].platform = null
+                  this.printerRuntime[printerName].displayName = null
+                  notInstalledCount++
+                }
+              })
+              console.log(`[PrinterDetect][Frontend] DETECT_SUCCESS detected=${installedNames.length} printers: installed=${installedCount}, not_installed=${notInstalledCount}`)
+            }
             
-            console.log(`[PrinterDetect][Frontend] DETECT_SUCCESS detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} installed=${installedCount} not_installed=${notInstalledCount} final_state=installed/not_installed`)
+            console.log(`[PrinterDetect][Frontend] DETECT_SUCCESS detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} final_state=idle`)
             return // 成功，退出循环
           } else {
             // 异常情况
@@ -2061,12 +2170,24 @@ export default {
             this.printerDetect.error = err.toString() || err.message || '未知错误'
             const totalElapsed = performance.now() - detectStartTime
             
-            console.log(`[PrinterDetect][Frontend] DETECT_FINAL_ERROR detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} final_state=unknown error=${err}`)
+            // 从错误消息中提取错误码（格式: MAC_LPSTAT_EXEC_FAIL 等）
+            const errorMsg = err.toString()
+            const errorCodeMatch = errorMsg.match(/MAC_\w+/)
+            const errorCode = errorCodeMatch ? errorCodeMatch[0] : 'UNKNOWN_ERROR'
             
-            // 将所有 detecting 状态置为 unknown
+            console.log(`[PrinterDetect][Frontend] DETECT_FINAL_ERROR detect_id=${detectId} total_elapsed_ms=${totalElapsed.toFixed(2)} attempts=${attemptCount} final_state=error error_code=${errorCode}`)
+            
+            // 根据错误码设置不同的状态（用于显示不同的文案）
+            let detectState = 'error' // 默认 error
+            
+            if (errorCode === 'MAC_CUPS_NOT_RUNNING') {
+              detectState = 'cups_error'
+            }
+            
+            // 将所有 detecting 状态置为相应的错误状态
             Object.keys(this.printerRuntime).forEach(printerName => {
               if (this.printerRuntime[printerName].detectState === 'detecting') {
-                this.printerRuntime[printerName].detectState = 'unknown'
+                this.printerRuntime[printerName].detectState = detectState
               }
             })
             return
@@ -2119,6 +2240,7 @@ export default {
         this.config = configResult.config
 
         // 初始化打印机运行时状态（所有打印机初始为 detecting）
+        this.loadInstalledKeyMap()
         this.initializePrinterRuntime()
         
         // 初始化安装方式默认值（从配置文件中读取）
@@ -2345,9 +2467,13 @@ export default {
             async printTestPage() {
               try {
                 // 调用后端打印测试页
-                const printerName = this.installProgressStore.activeJob?.printerName || 'Unknown'
-                const result = await invoke('print_test_page', { 
-                  printerName: printerName
+                const activeJob = this.installProgressStore.activeJob
+                const printerName = activeJob?.printerName || 'Unknown'
+                const targetName = activeJob?.meta?.queueName || printerName
+                const result = await invoke('print_test_page', {
+                  payload: {
+                    queueName: targetName
+                  }
                 })
                 
                 // 显示成功对话框
@@ -2374,9 +2500,13 @@ export default {
                 this.statusMessage = `正在打印测试页: ${printer.name}...`
                 this.statusType = 'info'
                 
+                const runtime = this.printerRuntime[printer.name]
+                const targetName = runtime?.installedKey || printer.name
                 // 调用后端打印测试页
-                const result = await invoke('print_test_page', { 
-                  printerName: printer.name
+                const result = await invoke('print_test_page', {
+                  payload: {
+                    queueName: targetName
+                  }
                 })
                 
                 console.log(`[PrintTestPage] 打印成功: ${printer.name}`)
@@ -2409,10 +2539,10 @@ export default {
                 message: ''
               }
             },
-            async downloadAndUpdate() {
-              if (!this.versionUpdateInfo || !this.versionUpdateInfo.update_url) {
-                return
-              }
+    async downloadAndUpdate() {
+      if (!this.versionUpdateInfo || !this.versionUpdateInfo.update_url) {
+        return
+      }
               
               try {
                 this.statusMessage = '正在下载更新文件...'
@@ -2466,6 +2596,35 @@ export default {
         this.statusMessage = `无法打开钉钉: ${err}。请手动打开钉钉并联系IT热线`
         this.statusType = 'error'
       }
+    },
+    loadInstalledKeyMap() {
+      try {
+        const stored = localStorage.getItem('eprinty_installed_keys')
+        this.installedKeyMap = stored ? JSON.parse(stored) : {}
+      } catch (err) {
+        console.warn('[InstalledKey] load failed:', err)
+        this.installedKeyMap = {}
+      }
+    },
+    saveInstalledKeyMap() {
+      try {
+        localStorage.setItem('eprinty_installed_keys', JSON.stringify(this.installedKeyMap || {}))
+      } catch (err) {
+        console.warn('[InstalledKey] save failed:', err)
+      }
+    },
+    setInstalledKeyForPrinter(printerName, installedKey) {
+      if (!printerName || !installedKey) {
+        return
+      }
+      if (!this.installedKeyMap) {
+        this.installedKeyMap = {}
+      }
+      this.installedKeyMap[printerName] = installedKey
+      if (this.printerRuntime[printerName]) {
+        this.printerRuntime[printerName].installedKey = installedKey
+      }
+      this.saveInstalledKeyMap()
     },
     async openProductUrl(url) {
       try {
@@ -2691,10 +2850,43 @@ export default {
           openInstallModal: () => {
             this.isInstallModalOpen = true
           },
+          onEvent: evt => {
+            if (evt.stepId === 'job.done' && evt.state === 'success') {
+              const queueName = evt.meta?.queueName
+              if (queueName) {
+                this.setInstalledKeyForPrinter(evt.printerName, queueName)
+              }
+            }
+          },
         })
       }
 
       await this._installProgressListener.start()
+    },
+    async setupPrintProgressListener() {
+      if (this._printProgressUnlisten) {
+        return
+      }
+      try {
+        this._printProgressUnlisten = await listen('print_progress', event => {
+          const payload = event.payload || {}
+          const stepId = payload.stepId || payload.step_id || ''
+          const state = payload.state || ''
+          const message = payload.message || ''
+          if (state === 'running') {
+            this.statusMessage = message || '正在打印测试页...'
+            this.statusType = 'info'
+          } else if (state === 'success' || stepId === 'print.done') {
+            this.statusMessage = message || '测试页打印完成'
+            this.statusType = 'success'
+          } else if (state === 'failed' || stepId === 'print.failed') {
+            this.statusMessage = message || '测试页打印失败'
+            this.statusType = 'error'
+          }
+        })
+      } catch (err) {
+        console.warn('[PrintProgress] listener setup failed:', err)
+      }
     },
     // 切换调试窗口显示（不修改调试状态）
     toggleDebugWindow() {
@@ -2728,6 +2920,42 @@ export default {
         return printer.id
       }
       return `${printer.name}__${printer.path || ''}`
+    },
+    findPrinterConfigByName(printerName) {
+      if (!this.config || !this.config.cities) {
+        return null
+      }
+      for (const city of this.config.cities) {
+        if (!city.areas) continue
+        for (const area of city.areas) {
+          if (!area.printers) continue
+          const found = area.printers.find(p => p.name === printerName)
+          if (found) return found
+        }
+      }
+      return null
+    },
+    normalizeDeviceUri(value) {
+      if (!value) return ''
+      return value.toString().trim().toLowerCase().replace(/\/+$/, '')
+    },
+    buildDeviceUriFromPath(path) {
+      if (!path) return ''
+      const raw = path.toString().trim()
+      if (!raw) return ''
+      if (raw.includes('://')) {
+        return this.normalizeDeviceUri(raw)
+      }
+      const match = raw.match(/^([^:]+)(?::(\d+))?$/)
+      if (!match) {
+        return this.normalizeDeviceUri(raw)
+      }
+      const host = match[1]
+      const port = match[2]
+      if (port && port !== '631') {
+        return this.normalizeDeviceUri(`ipp://${host}:${port}/ipp/print`)
+      }
+      return this.normalizeDeviceUri(`ipp://${host}/ipp/print`)
     },
     // 安装方式类型定义和映射
     getInstallModeLabel(mode) {
@@ -3225,5 +3453,3 @@ export default {
   }
 }
 </script>
-
-

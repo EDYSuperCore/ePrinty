@@ -41,66 +41,9 @@ pub fn print_test_page_windows(printer_name: String) -> Result<String, String> {
     
     // 生成测试页内容
     let now = chrono::Local::now();
-    let test_content = format!(
-r#"
-====================================================
-    ePrinty 测试页 
-====================================================
-
-别担心，我不是广告，我只是来测试你的打印机 
-
-
-Hello 小伙伴！
-
-恭喜你，你的打印机已经安装成功啦！
-
-
-1 文字测试：
-
-我是一行可爱的测试文字。
-
-我也是一行幽默的测试文字。
-
-请放心打印，我不会跑掉的。
-
-
-2 ASCII 艺术测试：
-
-     (\\_/)
-     ( •_•)
-     />  ePrinty 向你问好！
-
-
-3 信息测试：
-
-打印机名称：{printer_name}
-
-测试打印时间：{test_time}
-
-
-4 字符集测试：
-
-中文：你好世界！
-
-English: Hello World!
-
-数字：0123456789
-
-特殊字符：!@#$%^&*()_+-=[]{{}}|;:',.<>?
-
-
-====================================================
- 小提示：
-
-如果你能看到这个页面，说明打印机工作正常 
-
-打印机越开心，工作效率越高哦!
-
-— ePrinty，让打印这件事，简单一点 —
-====================================================
-"#,
-        printer_name = printer_name,
-        test_time = now.format("%Y年%m月%d日 %H:%M:%S")
+    let test_content = crate::platform::test_page_content::build_test_page_content(
+        &printer_name,
+        &now.format("%Y年%m月%d日 %H:%M:%S").to_string(),
     );
     
     // 创建临时文件
@@ -231,4 +174,3 @@ fn print_printer_evidence(printer_name: &str, step: &str) {
         }
     }
 }
-

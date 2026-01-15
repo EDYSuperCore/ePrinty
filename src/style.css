@@ -39,14 +39,23 @@ body {
 
   background: #ffffff;             /* 内容区域白色背景 */
   border: 1px solid #b4b6b8;       /* 应用边框 */
-  border-radius: 8px;              /* 轻微圆角（Windows 11 风格）*/
-
+  
+  /* Windows: 8px 圆角（Windows 11 风格）；macOS: 无圆角（原生窗体） */
+  border-radius: 8px;
+  
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.08),
     0 12px 28px rgba(0, 0, 0, 0.12); /* 克制的双层阴影 */
 
   overflow: hidden;                /* 关键：裁剪圆角 */
   transition: border-radius 0.2s ease, box-shadow 0.2s ease; /* 平滑过渡 */
+}
+
+/* macOS：原生窗体，无需圆角 */
+.app-frame.is-macos {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
 }
 
 /* 最大化状态：移除圆角和阴影 */

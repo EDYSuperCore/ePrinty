@@ -10,6 +10,7 @@ use tauri::Manager;
 
 mod exec;
 mod platform;
+mod install_event_emitter;
 
 // ============================================================================
 // 常量定义
@@ -223,6 +224,9 @@ pub struct InstallProgressEvent {
     pub progress: Option<ProgressPayload>,
     pub error: Option<ErrorPayload>,
     pub meta: Option<serde_json::Value>, // 可选：附加 evidence
+    /// 统一 installMode 顶层字段（snake_case），前端优先读取
+    #[serde(rename = "install_mode", skip_serializing_if = "Option::is_none")]
+    pub install_mode: Option<String>,
     /// 兼容期：映射旧的 phase 名称（download/stageDriver 等）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy_phase: Option<String>,
@@ -1001,14 +1005,35 @@ async fn debug_fetch_driver_payload(_remote_url: String, _sha256: String) -> Res
 
 // 获取本地已安装的打印机列表
 #[tauri::command]
-fn list_printers() -> Result<Vec<String>, String> {
-    crate::platform::list_printers()
+fn list_printers() -> Result<Vec<crate::platform::PrinterDetectEntry>, String> {
+    eprintln!("[ListPrinters][Command] ENTER cmd=list_printers");
+    let printers = crate::platform::list_printers()?;
+    let sample = printers.get(0).map(|p| {
+        format!(
+            "queueName=\"{}\" displayName=\"{}\" deviceUri=\"{}\"",
+            p.system_queue_name,
+            p.display_name.as_deref().unwrap_or(""),
+            p.device_uri.as_deref().unwrap_or("")
+        )
+    });
+    eprintln!(
+        "[ListPrinters][Command] EXIT cmd=list_printers returned_count={} sample={}",
+        printers.len(),
+        sample.unwrap_or_else(|| "none".to_string())
+    );
+    Ok(printers)
 }
 
 // 获取本地已安装的打印机详细列表（包含 comment 和 location）
 #[tauri::command]
-fn list_printers_detailed() -> Result<Vec<crate::platform::windows::list::DetailedPrinterInfo>, String> {
-    crate::platform::list_printers_detailed()
+fn list_printers_detailed() -> Result<Vec<crate::platform::DetailedPrinterInfo>, String> {
+    eprintln!("[ListPrintersDetailed][Command] ENTER cmd=list_printers_detailed");
+    let printers = crate::platform::list_printers_detailed()?;
+    eprintln!(
+        "[ListPrintersDetailed][Command] EXIT cmd=list_printers_detailed returned_count={}",
+        printers.len()
+    );
+    Ok(printers)
 }
 
 // 安装打印机（v2.0.0+ 使用 driverKey 从 driverCatalog 获取驱动规格）
@@ -1149,7 +1174,7 @@ async fn install_printer(
     _driverPath: Option<String>,
     model: Option<String>,
     _driverInstallPolicy: Option<String>,
-    installMode: Option<String>,  // 必须为 driverless
+    installMode: Option<String>,  // macOS 会自动降级为 driverless
     dryRun: Option<bool>  // 测试模式
 ) -> Result<InstallResult, String> {
     if name.trim().is_empty() {
@@ -1157,11 +1182,6 @@ async fn install_printer(
     }
     if path.trim().is_empty() {
         return Err("打印机路径不能为空".to_string());
-    }
-
-    let requested_mode = installMode.clone().unwrap_or_default();
-    if requested_mode.to_lowercase() != "driverless" {
-        return Err("macOS 仅支持 installMode=\"driverless\"".to_string());
     }
 
     let dry_run_value = dryRun.unwrap_or(true);
@@ -1174,7 +1194,7 @@ async fn install_printer(
         model,
         None,
         None,
-        Some("driverless".to_string()),
+        installMode,
         dry_run_value,
     )
     .await
@@ -1203,16 +1223,26 @@ fn open_url(url: String) -> Result<String, String> {
     Ok("已打开".to_string())
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrintTestPageRequest {
+    queue_name: Option<String>,
+    printer_name: Option<String>,
+}
+
 // 打印测试页
 #[tauri::command]
-fn print_test_page(printer_name: String) -> Result<String, String> {
-    // 参数校验
-    if printer_name.trim().is_empty() {
+fn print_test_page(app: tauri::AppHandle, payload: PrintTestPageRequest) -> Result<String, String> {
+    let destination = payload
+        .queue_name
+        .or(payload.printer_name)
+        .unwrap_or_default();
+
+    if destination.trim().is_empty() {
         return Err("[PrintTestPage] ERROR step=VALIDATE message=打印机名称不能为空".to_string());
     }
-    
-    // 打印入参（JSON 风格，显示可见字符和长度）
-    let printer_name_json = printer_name
+
+    let destination_json = destination
         .chars()
         .map(|c| {
             if c.is_control() {
@@ -1226,11 +1256,14 @@ fn print_test_page(printer_name: String) -> Result<String, String> {
             }
         })
         .collect::<String>();
-    eprintln!("[Command] print_test_page received printer_name=\"{}\" len={} bytes={}", 
-        printer_name_json, printer_name.len(), printer_name.as_bytes().len());
-    
-    // 调用平台统一的打印测试页入口
-    crate::platform::print_test_page(printer_name)
+    eprintln!(
+        "[Command] print_test_page received queue_name=\"{}\" len={} bytes={}",
+        destination_json,
+        destination.len(),
+        destination.as_bytes().len()
+    );
+
+    crate::platform::print_test_page(app, destination)
 }
 
 // 重装打印机
@@ -1996,10 +2029,11 @@ fn main() {
                     }),
                     error: None,
                     meta: None,
+                    install_mode: Some("auto".to_string()),
                     legacy_phase: Some("download".to_string()),
                 };
                 
-                match app_handle.emit_all("install_progress", &selfcheck_event) {
+                match crate::install_event_emitter::emit_install_progress(&app_handle, selfcheck_event) {
                     Ok(_) => {
                         eprintln!("[ProgressEmit] selfcheck emitted");
                     }
@@ -2111,4 +2145,3 @@ fn main() {
         std::process::exit(1);
     }
 }
-

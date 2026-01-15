@@ -9,6 +9,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tauri::Manager;
 
+use crate::install_event_emitter::emit_install_progress;
+
 
 // ============================================================================
 // 常量定义
@@ -3251,11 +3253,12 @@ fn emit_progress_event(
         progress,
         error,
         meta: None,
+        install_mode: None,
         legacy_phase,
     };
     
     // 统一日志：在emit调用之后打印，包含emit的Result
-    match app.emit_all("install_progress", &event) {
+    match emit_install_progress(app, event) {
         Ok(_) => {
             eprintln!(
                 "[ProgressEmit] jobId={} printer={} stepId={} state={} result=Ok",
@@ -3304,10 +3307,16 @@ fn emit_job_done(
         progress: None,
         error,
         meta: None,
+        install_mode: None,
         legacy_phase: None,
     };
     
-    let _ = app.emit_all("install_progress", &done_event);
+    if let Err(err) = emit_install_progress(app, done_event) {
+        eprintln!(
+            "[InstallPrinterWindows] job.done emit failed for jobId={} state={} error={}",
+            job_id, state, err
+        );
+    }
     eprintln!("[InstallPrinterWindows] job.done event emitted for jobId={} state={}", job_id, state);
 }
 
@@ -3352,10 +3361,16 @@ fn emit_final_verify_if_needed(
         },
         error: None,
         meta: None,
+        install_mode: None,
         legacy_phase: Some("finalVerify".to_string()),
     };
     
-    let _ = app.emit_all("install_progress", &verify_event);
+    if let Err(err) = emit_install_progress(app, verify_event) {
+        eprintln!(
+            "[InstallPrinterWindows] finalVerify emit failed for jobId={} state={} error={}",
+            job_id, state, err
+        );
+    }
     eprintln!("[InstallPrinterWindows] finalVerify event emitted for jobId={} state={}", job_id, state);
 }
 
@@ -3404,7 +3419,7 @@ pub async fn install_printer_windows(
     meta.insert("dryRun".to_string(), serde_json::Value::Bool(dry_run));
     
     let init_event = crate::InstallProgressEvent {
-                        job_id: job_id.to_string(),
+        job_id: job_id.to_string(),
         printer_name: name.clone(),
         step_id: "job.init".to_string(),
         state: "running".to_string(),
@@ -3413,10 +3428,13 @@ pub async fn install_printer_windows(
         progress: None,
         error: None,
         meta: Some(serde_json::Value::Object(meta)),
+        install_mode: Some(installMode.clone().unwrap_or_else(|| "auto".to_string())),
         legacy_phase: None,
     };
     
-    let _ = app.emit_all("install_progress", &init_event);
+    if let Err(err) = emit_install_progress(&app, init_event) {
+        eprintln!("[InstallPrinterWindows] job.init emit failed: {}", err);
+    }
     eprintln!("[InstallPrinterWindows] job.init event emitted for jobId={}", job_id);
     
     // 执行安装逻辑，并在所有返回点 emit job.done
@@ -5002,4 +5020,3 @@ async fn install_printer_windows_inner(
         }
     }
 }
-

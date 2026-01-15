@@ -1,7 +1,7 @@
 <template>
   <header class="titlebar">
-    <!-- 左：品牌区（可拖拽） -->
-    <div class="brand" data-tauri-drag-region>
+    <!-- 左：品牌区（Windows 可拖拽，macOS 不拖拽） -->
+    <div class="brand" :data-tauri-drag-region="!isMacOS">
       <div class="icon-box" aria-hidden="true">
         <img src="/icon.png" alt="ePrinty" class="icon-img" />
       </div>
@@ -17,16 +17,16 @@
       </div>
     </div>
 
-    <!-- 中：留白（可拖拽） -->
-    <div class="spacer" data-tauri-drag-region></div>
+    <!-- 中：留白（Windows 可拖拽，macOS 不拖拽） -->
+    <div class="spacer" :data-tauri-drag-region="!isMacOS"></div>
 
-    <!-- 右：业务操作按钮（不可拖拽，先留空） -->
+    <!-- 右：业务操作按钮（不可拖拽） -->
     <div class="actions" data-tauri-drag-region="false">
       <slot name="actions" />
     </div>
 
-    <!-- 右上：窗口按钮（小尺寸，不可拖拽） -->
-    <div class="win" data-tauri-drag-region="false">
+    <!-- 右上：窗口按钮（仅 Windows 显示） -->
+    <div v-if="!isMacOS" class="win" data-tauri-drag-region="false">
       <button class="win-btn" type="button" aria-label="Minimize" @click="minimize">—</button>
       <button class="win-btn win-close" type="button" aria-label="Close" @click="close">✕</button>
     </div>
@@ -36,6 +36,9 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import { appWindow } from "@tauri-apps/api/window";
+
+// 平台检测：macOS 不显示窗体控制按钮，不启用拖拽
+const isMacOS = navigator.userAgent.includes('Mac OS X');
 
 const isMaximized = ref(false);
 const displayedSlogan = ref("");

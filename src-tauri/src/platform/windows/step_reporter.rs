@@ -3,7 +3,9 @@
 
 use serde_json;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+
+use crate::install_event_emitter::emit_install_progress;
 
 /// StepReporter：管理单个步骤的生命周期
 pub struct StepReporter {
@@ -38,10 +40,13 @@ impl StepReporter {
             progress: None,
             error: None,
             meta: None,
+            install_mode: None,
             legacy_phase: None,
         };
 
-        let _ = app.emit_all("install_progress", &event);
+        if let Err(err) = emit_install_progress(&app, event) {
+            eprintln!("[StepReporter] step={} emit failed: {}", step_id, err);
+        }
         eprintln!(
             "[StepReporter] step={} state=running message=\"{}\"",
             step_id, message
@@ -91,10 +96,13 @@ impl StepReporter {
             progress,
             error: None,
             meta: None,
+            install_mode: None,
             legacy_phase: None,
         };
 
-        let _ = self.app.emit_all("install_progress", &event);
+        if let Err(err) = emit_install_progress(&self.app, event) {
+            eprintln!("[StepReporter] step={} emit failed: {}", self.step_id, err);
+        }
     }
 
     /// 标记为成功
@@ -146,19 +154,20 @@ impl StepReporter {
             printer_name: self.printer_name.clone(),
             step_id: self.step_id.clone(),
             state: state.to_string(),
-            message,
+            message: message.clone(),
             ts_ms,
             progress: None,
             error,
             meta,
+            install_mode: None,
             legacy_phase: None,
         };
 
-        match self.app.emit_all("install_progress", &event) {
+        match emit_install_progress(&self.app, event) {
             Ok(_) => {
                 eprintln!(
                     "[StepReporter] step={} state={} message=\"{}\"",
-                    self.step_id, state, event.message
+                    self.step_id, state, message
                 );
                 Ok(())
             }

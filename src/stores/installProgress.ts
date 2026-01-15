@@ -373,28 +373,39 @@ export const useInstallProgressStore = defineStore('installProgress', () => {
         job.startedAt = incomingTs
         job.jobState = 'running'
         
-        // 从 job.init 事件的 meta 提取 installMode 和 driverKey，写入 job.meta（关键！）
+        // 从 job.init 事件提取 installMode/driverKey，写入 job.meta（关键！）
+        const rawInstallMode = evt.installMode || evt.meta?.installMode
+        if (rawInstallMode) {
+          if (!job.meta) {
+            job.meta = {}
+          }
+          const normalized = normalizeInstallMode(rawInstallMode as string)
+          job.meta.installMode = normalized
+          console.log(`[InstallProgressStore] job.init: extracted installMode="${rawInstallMode}" normalized="${normalized}"`)
+        }
+
         if (evt.meta) {
           if (!job.meta) {
             job.meta = {}
           }
-          
-          // 提取 installMode（后端已确定，前端规范化）
-          const rawInstallMode = evt.meta.installMode
-          if (rawInstallMode) {
-            const normalized = normalizeInstallMode(rawInstallMode as string)
-            job.meta.installMode = normalized
-            console.log(`[InstallProgressStore] job.init: extracted installMode="${rawInstallMode}" normalized="${normalized}"`)
-          }
-          
           // 提取 driverKey
           const driverKey = evt.meta.driverKey
           if (driverKey) {
             job.meta.driverKey = driverKey
             console.log(`[InstallProgressStore] job.init: extracted driverKey="${driverKey}"`)
           }
+
+          const queueName = evt.meta.queueName
+          if (queueName) {
+            job.meta.queueName = queueName
+          }
+
+          const deviceUri = evt.meta.deviceUri || evt.meta.uri
+          if (deviceUri) {
+            job.meta.deviceUri = deviceUri
+          }
         }
-      } else if (stepId === 'job.done') {
+      } else if (stepId === 'job.done' || stepId === 'job.failed') {
         // 清理 watchdog timer（如果还在等待终态）
         if (job.terminalTimerId) {
           clearTimeout(job.terminalTimerId)
@@ -403,15 +414,16 @@ export const useInstallProgressStore = defineStore('installProgress', () => {
         job.awaitingTerminal = false
 
         job.doneAtMs = incomingTs
-        job.jobState = evt.state === 'success' ? 'success' : 'failed'
+        job.jobState = stepId === 'job.failed' ? 'failed' : evt.state === 'success' ? 'success' : 'failed'
 
         // 写入终态步骤快照（不展示，用于终态判断）
-        const existingDone = job.steps['job.done']
+        const doneStepId = stepId === 'job.failed' ? 'job.failed' : 'job.done'
+        const existingDone = job.steps[doneStepId]
         if (!existingDone || !isDuplicateStepEvent(existingDone, evt)) {
-          job.steps['job.done'] = {
-            stepId: 'job.done',
-            label: '安装完成',
-            state: evt.state as StepSnapshot['state'],
+          job.steps[doneStepId] = {
+            stepId: doneStepId,
+            label: doneStepId === 'job.failed' ? '安装失败' : '安装完成',
+            state: stepId === 'job.failed' ? 'failed' : (evt.state as StepSnapshot['state']),
             message: evt.message,
             endedAt: incomingTs,
             updatedAtMs: incomingTs,

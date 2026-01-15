@@ -61,20 +61,10 @@ pub fn list_printers_windows() -> Result<Vec<String>, String> {
     Ok(printers)
 }
 
-/// 详细的打印机信息结构体（包含 comment 和 location）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DetailedPrinterInfo {
-    pub name: String,
-    pub port_name: Option<String>,
-    pub driver_name: Option<String>,
-    pub comment: Option<String>,
-    pub location: Option<String>,
-}
-
 /// 获取 Windows 系统已安装的打印机详细列表（包含 comment 和 location）
 /// 
 /// 使用 Win32 API EnumPrintersW 枚举名称，然后对每个打印机使用 GetPrinterW(Level=2) 获取完整信息
-pub fn list_printers_detailed() -> Result<Vec<DetailedPrinterInfo>, String> {
+pub fn list_printers_detailed() -> Result<Vec<super::DetailedPrinterInfo>, String> {
     
     // 生成唯一调用 ID
     let call_id = CALL_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -124,7 +114,7 @@ pub fn list_printers_detailed() -> Result<Vec<DetailedPrinterInfo>, String> {
 }
 
 /// 使用 GetPrinterW(Level=2) 获取单个打印机的完整信息
-fn get_printer_info_level_2(printer_name: &str) -> Result<DetailedPrinterInfo, String> {
+fn get_printer_info_level_2(printer_name: &str) -> Result<super::DetailedPrinterInfo, String> {
     use winapi::um::winspool::{OpenPrinterW, GetPrinterW, ClosePrinter, PRINTER_DEFAULTSW, PRINTER_INFO_2W};
     use winapi::um::winnt::LPWSTR;
     use winapi::um::errhandlingapi::GetLastError;
@@ -248,7 +238,7 @@ fn get_printer_info_level_2(printer_name: &str) -> Result<DetailedPrinterInfo, S
                 None
             };
             
-            info_result = Ok(DetailedPrinterInfo {
+            info_result = Ok(super::DetailedPrinterInfo {
                 name,
                 port_name,
                 driver_name,

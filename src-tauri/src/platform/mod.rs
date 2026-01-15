@@ -4,25 +4,75 @@ pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+pub mod test_page_content;
+
+use serde::{Deserialize, Serialize};
+
 // 导入 InstallResult 类型（需要在 main.rs 中定义或从 windows 模块导入）
 // 注意：由于 InstallResult 在 main.rs 中定义，这里使用 crate::InstallResult
+
+/// 详细的打印机信息结构体（包含 comment 和 location）
+/// 在所有平台上定义以避免条件编译问题
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailedPrinterInfo {
+    pub name: String,
+    pub port_name: Option<String>,
+    pub driver_name: Option<String>,
+    pub comment: Option<String>,
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrinterDetectEntry {
+    pub installed_key: String,
+    pub system_queue_name: String,
+    pub display_name: Option<String>,
+    pub device_uri: Option<String>,
+    pub is_accepting_jobs: Option<bool>,
+    pub state: Option<i32>,
+    pub platform: String,
+}
 
 /// 平台统一的打印机列表获取入口
 /// 
 /// 根据当前平台调用相应的实现：
 /// - Windows: 调用 Windows 实现
 /// - macOS: 调用 macOS 实现
-pub fn list_printers() -> Result<Vec<String>, String> {
+pub fn list_printers() -> Result<Vec<PrinterDetectEntry>, String> {
     #[cfg(windows)]
     {
         // Windows 平台：调用 Windows 实现
-        crate::platform::windows::list::list_printers_windows()
+        let names = crate::platform::windows::list::list_printers_windows()?;
+        Ok(names
+            .into_iter()
+            .map(|name| PrinterDetectEntry {
+                installed_key: name.clone(),
+                system_queue_name: name.clone(),
+                display_name: Some(name),
+                device_uri: None,
+                is_accepting_jobs: None,
+                state: None,
+                platform: "windows".to_string(),
+            })
+            .collect())
     }
     
     #[cfg(target_os = "macos")]
     {
-        // macOS 平台：调用 macOS 实现
-        crate::platform::macos::list_printers_macos()
+        let destinations = crate::platform::macos::list_destinations()?;
+        Ok(destinations
+            .into_iter()
+            .map(|dest| PrinterDetectEntry {
+                installed_key: dest.name.clone(),
+                system_queue_name: dest.name,
+                display_name: dest.display_name,
+                device_uri: dest.device_uri,
+                is_accepting_jobs: dest.is_accepting_jobs,
+                state: dest.state,
+                platform: "macos".to_string(),
+            })
+            .collect())
     }
     
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -36,7 +86,7 @@ pub fn list_printers() -> Result<Vec<String>, String> {
 /// 根据当前平台调用相应的实现：
 /// - Windows: 调用 Windows 实现
 /// - macOS: 调用 macOS 实现（暂未实现）
-pub fn list_printers_detailed() -> Result<Vec<crate::platform::windows::list::DetailedPrinterInfo>, String> {
+pub fn list_printers_detailed() -> Result<Vec<DetailedPrinterInfo>, String> {
     #[cfg(windows)]
     {
         // Windows 平台：调用 Windows 实现
@@ -111,7 +161,7 @@ pub async fn install_printer(
 /// 根据当前平台调用相应的实现：
 /// - Windows: 调用 Windows 实现
 /// - macOS: 调用 macOS 实现（暂未实现）
-pub fn print_test_page(printer_name: String) -> Result<String, String> {
+pub fn print_test_page(app: tauri::AppHandle, printer_name: String) -> Result<String, String> {
     #[cfg(windows)]
     {
         // Windows 平台：调用 Windows 实现
@@ -121,8 +171,7 @@ pub fn print_test_page(printer_name: String) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         // macOS 平台：调用 macOS 实现
-        // 注意：macOS 打印测试页实现尚未迁移到 platform/macos，暂时返回错误
-        Err("macOS 平台暂不支持该功能".to_string())
+        crate::platform::macos::test_page::print_test_page_macos(app, printer_name)
     }
     
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -199,4 +248,3 @@ pub fn open_url(url: &str) -> Result<(), String> {
         Err("当前仅支持 Windows 和 macOS 平台".to_string())
     }
 }
-

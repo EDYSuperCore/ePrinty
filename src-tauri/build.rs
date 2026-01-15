@@ -8,6 +8,9 @@ fn main() {
     
     // 嵌入 Windows manifest（请求管理员权限）
     embed_windows_manifest();
+
+    // macOS: link against libcups for FFI
+    link_cups();
     
     // 将配置文件复制到输出目录（release/debug），使其与可执行文件在同一目录
     // 注意：这个操作是可选的，如果失败不会阻止构建
@@ -37,6 +40,14 @@ fn embed_windows_manifest() {
 fn embed_windows_manifest() {
     // 非 Windows 平台不需要 manifest
 }
+
+#[cfg(target_os = "macos")]
+fn link_cups() {
+    println!("cargo:rustc-link-lib=cups");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn link_cups() {}
 
 fn copy_config_file() {
     // 获取项目根目录（src-tauri 的父目录）
@@ -140,4 +151,3 @@ fn copy_config_file() {
         }
     }
 }
-

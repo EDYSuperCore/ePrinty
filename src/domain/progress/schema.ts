@@ -15,7 +15,7 @@ export const DISPLAY_STEP_IDS = [
 ] as const
 
 // Job 级别事件 ID（不进入步骤列表）
-export const JOB_EVENT_IDS = ['job.init', 'job.done'] as const
+export const JOB_EVENT_IDS = ['job.init', 'job.done', 'job.failed'] as const
 
 export const ALLOWED_STEP_IDS = [...DISPLAY_STEP_IDS, ...JOB_EVENT_IDS] as const
 
@@ -54,6 +54,16 @@ export function normalizeProgressEvent(payload: any): NormalizedProgressEvent | 
     return null
   }
 
+  const rawInstallMode = typeof payload?.install_mode === 'string'
+    ? payload.install_mode
+    : typeof payload?.installMode === 'string'
+      ? payload.installMode
+      : typeof payload?.meta?.effectiveMode === 'string'
+        ? payload.meta.effectiveMode
+        : typeof payload?.meta?.installMode === 'string'
+          ? payload.meta.installMode
+          : undefined
+
   const tsMs = typeof payload?.tsMs === 'number'
     ? payload.tsMs
     : typeof payload?.ts_ms === 'number'
@@ -67,6 +77,7 @@ export function normalizeProgressEvent(payload: any): NormalizedProgressEvent | 
     state,
     tsMs,
     message: payload?.message || undefined,
+    installMode: rawInstallMode,
     progress: payload?.progress
       ? {
           current: payload.progress.current,

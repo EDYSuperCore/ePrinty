@@ -11,10 +11,11 @@ interface CreateListenerOptions {
   store: InstallProgressStore
   openInstallModal: () => void
   shouldSilenceSelfcheck?: (payload: any) => boolean
+  onEvent?: (evt: any) => void
 }
 
 export function createInstallProgressListener(options: CreateListenerOptions) {
-  const { store, openInstallModal, shouldSilenceSelfcheck } = options
+  const { store, openInstallModal, shouldSilenceSelfcheck, onEvent } = options
   let unlistenProgress: (() => void) | null = null
 
   const isSelfcheck = (payload: any) => {
@@ -45,6 +46,9 @@ export function createInstallProgressListener(options: CreateListenerOptions) {
     }
 
     store.applyEvent(normalizedEvent)
+    if (typeof onEvent === 'function') {
+      onEvent(normalizedEvent)
+    }
 
     if (!store.activeJobId) {
       const isJobInit = normalizedEvent.stepId === 'job.init'

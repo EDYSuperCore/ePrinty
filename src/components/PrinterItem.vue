@@ -178,6 +178,55 @@
         </div>
       </div>
       
+      <!-- error: 检测失败 -->
+      <div v-else-if="detectState === 'error'" class="px-4 py-1.5 text-xs font-medium text-red-600 flex items-center space-x-1.5">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+        </svg>
+        <span>检测失败</span>
+      </div>
+      
+      <!-- empty: 系统无打印机，显示安装按钮 -->
+      <div v-else-if="detectState === 'empty'" class="flex items-center space-x-2">
+        <span class="px-3 py-1.5 text-xs font-medium text-gray-600">未安装</span>
+        <div class="install-actions flex gap-2">
+          <button
+            @click="handleInstall"
+            :disabled="installing"
+            class="px-4 py-1.5 text-xs font-medium text-white bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors flex items-center space-x-1.5"
+          >
+            <svg v-if="installing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{{ installing ? '安装中...' : '安装' }}</span>
+          </button>
+          <button
+            @click="handleRetryDetect"
+            class="px-4 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors flex items-center space-x-1.5"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>重新检测</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- cups_error: CUPS 服务未运行 -->
+      <div v-else-if="detectState === 'cups_error'" class="px-4 py-1.5 text-xs font-medium text-amber-600 flex items-center space-x-1.5 group relative">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+        </svg>
+        <span>打印服务异常</span>
+        <!-- 悬停提示 -->
+        <div class="absolute left-0 top-full mt-1 hidden group-hover:block bg-gray-900 text-white text-xs px-3 py-2 rounded whitespace-nowrap z-10">
+          macOS 打印服务未运行，请尝试：<br/>
+          1. 打开"系统设置 → 打印机与扫描仪"<br/>
+          2. 或重启系统后重试
+        </div>
+      </div>
+      
       <!-- 降级：如果没有 detectState，使用旧的 isInstalled 逻辑 -->
       <template v-else>
         <div v-if="!isInstalled" class="install-actions">
@@ -312,8 +361,8 @@ export default {
     },
     detectState: {
       type: String,
-      default: 'unknown', // 'detecting' | 'installed' | 'not_installed' | 'unknown'
-      validator: (value) => ['detecting', 'installed', 'not_installed', 'unknown'].includes(value)
+      default: 'unknown', // 'detecting' | 'installed' | 'not_installed' | 'unknown' | 'error' | 'empty' | 'cups_error'
+      validator: (value) => ['detecting', 'installed', 'not_installed', 'unknown', 'error', 'empty', 'cups_error'].includes(value)
     },
     installing: {
       type: Boolean,

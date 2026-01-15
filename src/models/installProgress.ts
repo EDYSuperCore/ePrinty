@@ -16,6 +16,7 @@ export interface InstallProgressEvent {
   state: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   tsMs: number
   message?: string
+  installMode?: string
   progress?: {
     current?: number
     total?: number

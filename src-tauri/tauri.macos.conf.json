@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "tauri": {
+    "windows": [
+      {
+        "decorations": true,
+        "transparent": false,
+        "titleBarStyle": "Visible",
+        "title": "ePrinty - 让打印这件事，简单一点"
+      }
+    ]
+  }
+}
