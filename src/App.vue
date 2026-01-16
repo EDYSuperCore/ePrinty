@@ -1714,6 +1714,7 @@ export default {
       },
       debugMode: true, // 调试模式开关（默认开启，始终记录日志）
       showDebugButton: false, // 调试按钮显示状态（默认隐藏，按 Ctrl+Shift+D 显示）
+      debugModeEnabled: false, // 单一事实源：是否处于调试模式（仅通过 Ctrl+Shift+D 启用）
       showDebugWindow: false, // 显示调试日志窗口
       debugLogs: [], // 调试日志数组
       debugLogFilter: 'all', // 日志筛选：'all', 'log', 'info', 'warn', 'error'
@@ -1746,8 +1747,8 @@ export default {
   computed: {
     // 是否应该显示 dryRun 开关（仅调试模式）
     shouldShowDryRun() {
-      // 开发环境或调试按钮已显示（按了 Ctrl+Shift+D）
-      return this.isDev || this.showDebugButton
+      // 仅当 debugModeEnabled 为 true 时显示（单一事实源）
+      return this.debugModeEnabled
     },
     // Store 相关计算属性
     installProgressStore() {
@@ -1802,7 +1803,20 @@ export default {
     }
   },
   watch: {
-    // Watchers removed: UI now derives from store only
+    // 监听 debugModeEnabled 变化，进入调试模式时重新加载 dryRun 设置
+    debugModeEnabled(newVal) {
+      if (newVal) {
+        // 进入调试模式：重新加载 dryRun 设置（允许从缓存恢复）
+        this.loadDryRunSetting()
+      } else {
+        // 退出调试模式：强制 dryRun = false 并清理缓存
+        if (this.dryRun) {
+          console.warn('[Safety] 退出调试模式，强制 dryRun = false')
+          this.dryRun = false
+          localStorage.setItem('eprinty_dry_run', 'false')
+        }
+      }
+    }
   },
   async mounted() {
     // 软件一打开就显示加载提示
@@ -1947,9 +1961,9 @@ export default {
       }
       
       // 优先级 B: 包含匹配（两个方向都尝试）
-      if (normalized1.includes(normalized2) || normalized2.includes(normalized1)) {
-        return true
-      }
+      //if (normalized1.includes(normalized2) || normalized2.includes(normalized1)) {
+      //  return true
+      //}
       
       return false
     },
@@ -2399,11 +2413,11 @@ export default {
               // 获取打印机唯一标识 key
               const key = this.getPrinterKey(printer)
               
-              // 运行态保护：非调试模式下强制 dryRun = false
-              const isDebugMode = this.isDev || this.showDebugButton
-              const effectiveDryRun = isDebugMode ? this.dryRun : false
+              // 运行态保护：非调试模式下强制 dryRun = false（双保险）
+              // 使用单一事实源 debugModeEnabled
+              const effectiveDryRun = this.debugModeEnabled ? this.dryRun : false
               
-              if (!isDebugMode && this.dryRun) {
+              if (!this.debugModeEnabled && this.dryRun) {
                 console.warn('[Safety] 非调试模式下强制 dryRun = false（原值: true）')
               }
               
@@ -2814,9 +2828,11 @@ export default {
         event.preventDefault()
         event.stopPropagation()
         
-        if (!this.showDebugButton) {
+        // 单一事实源：设置 debugModeEnabled 为 true
+        if (!this.debugModeEnabled) {
+          this.debugModeEnabled = true
           this.showDebugButton = true
-          console.log('[Debug] 调试按钮已显示（按 Ctrl+Shift+D）')
+          console.log('[Debug] 调试模式已启用（按 Ctrl+Shift+D）')
         }
       }
     },
@@ -2937,38 +2953,64 @@ export default {
       // 监听配置更新事件
       if (!this._configUpdatedUnlisten) {
         try {
-          this._configUpdatedUnlisten = await listen('config_updated', (event) => {
+          this._configUpdatedUnlisten = await listen('config_updated', async (event) => {
             console.log('[UI_RENDER] 收到 config_updated 事件')
             const payload = event.payload
             if (payload && payload.config) {
-              // 更新配置
-              this.config = payload.config
-              
-              // 重新初始化打印机运行时状态
-              this.loadInstalledKeyMap()
-              this.initializePrinterRuntime()
-              
-              // 重新初始化安装方式默认值
-              if (this.config && this.config.cities) {
-                this.config.cities.forEach(city => {
-                  city.areas.forEach(area => {
-                    if (area.printers) {
-                      this.initInstallModeDefaults(area.printers)
-                    }
+              // 只有 updated=true 时才真正更新（版本提升）
+              if (payload.updated === true) {
+                // 更新配置
+                this.config = payload.config
+                
+                // 重新初始化打印机运行时状态
+                this.loadInstalledKeyMap()
+                this.initializePrinterRuntime()
+                
+                // 重新初始化安装方式默认值
+                if (this.config && this.config.cities) {
+                  this.config.cities.forEach(city => {
+                    city.areas.forEach(area => {
+                      if (area.printers) {
+                        this.initInstallModeDefaults(area.printers)
+                      }
+                    })
                   })
-                })
-              }
-              
-              // 显示更新提示
-              this.statusMessage = '配置已更新'
-              this.statusType = 'success'
-              setTimeout(() => {
-                if (this.statusMessage === '配置已更新') {
-                  this.statusMessage = ''
                 }
-              }, 3000)
-              
-              console.log('[UI_RENDER] 配置已热更新 version=', payload.version)
+                
+                // 触发重新检测打印机状态（确保最终一致性）
+                // 方案一：重新运行检测（推荐，最稳）
+                if (this.printerDetect.status === 'running') {
+                  // 如果正在检测，标记为待处理，检测结束后立即再跑一次
+                  console.log('[UI_RENDER] 检测正在运行，将在完成后重新检测')
+                  // 使用 debounce：等待当前检测完成
+                  const checkInterval = setInterval(() => {
+                    if (this.printerDetect.status !== 'running') {
+                      clearInterval(checkInterval)
+                      console.log('[UI_RENDER] 检测完成，触发重新检测以收敛状态')
+                      this.startDetectInstalledPrinters().catch(() => {})
+                    }
+                  }, 500)
+                  // 最多等待 30 秒
+                  setTimeout(() => clearInterval(checkInterval), 30000)
+                } else {
+                  // 立即触发重新检测
+                  console.log('[UI_RENDER] 触发重新检测以收敛状态')
+                  this.startDetectInstalledPrinters().catch(() => {})
+                }
+                
+                // 显示更新提示
+                this.statusMessage = '配置已更新'
+                this.statusType = 'success'
+                setTimeout(() => {
+                  if (this.statusMessage === '配置已更新') {
+                    this.statusMessage = ''
+                  }
+                }, 3000)
+                
+                console.log('[UI_RENDER] 配置已热更新 version=', payload.version)
+              } else {
+                console.log('[UI_RENDER] 远程配置版本未提升，跳过更新 version=', payload.version)
+              }
             }
           })
         } catch (err) {
@@ -3413,48 +3455,56 @@ export default {
       }
     },
     // 加载驱动安装策略设置（已弃用，保留用于兼容）
-    // 加载 dryRun 设置
+    // 加载 dryRun 设置（安全归一化）
     loadDryRunSetting() {
       try {
         const saved = localStorage.getItem('eprinty_dry_run')
-        const isDebugMode = this.isDev || this.showDebugButton
         
-        if (saved !== null) {
-          const savedValue = saved === 'true'
-          // 非调试模式下强制为 false
-          if (!isDebugMode && savedValue) {
-            console.warn('[Safety] dryRun 在非调试模式下被强制重置为 false（原值: true）')
+        // 安全归一化：非调试模式下强制为 false
+        if (!this.debugModeEnabled) {
+          // 非调试模式：强制 dryRun = false，并清理错误的缓存
+          if (saved === 'true') {
+            console.warn('[Safety] dryRun reset to false (not in debug mode)')
             this.dryRun = false
+            // 禁止保存 dryRun=true，立即清理
             localStorage.setItem('eprinty_dry_run', 'false')
           } else {
-            this.dryRun = savedValue
+            this.dryRun = false
           }
         } else {
-          // 默认值：false（安全策略）
-          this.dryRun = false
-          localStorage.setItem('eprinty_dry_run', 'false')
+          // 调试模式：允许从缓存加载
+          if (saved !== null) {
+            this.dryRun = saved === 'true'
+          } else {
+            this.dryRun = false
+          }
         }
       } catch (err) {
         console.error('加载 dryRun 设置失败:', err)
         this.dryRun = false // 默认值
       }
     },
-    // dryRun 设置变更
+    // dryRun 设置变更（仅调试模式下允许）
     onDryRunChange() {
       try {
-        const isDebugMode = this.isDev || this.showDebugButton
-        if (!isDebugMode) {
-          // 非调试模式下强制为 false
+        // 非调试模式下禁止启用 dryRun
+        if (!this.debugModeEnabled) {
           console.warn('[Safety] 非调试模式下不允许启用 dryRun，已重置为 false')
           this.dryRun = false
+          // 禁止保存 dryRun=true
+          localStorage.setItem('eprinty_dry_run', 'false')
+          return
         }
         
-        localStorage.setItem('eprinty_dry_run', this.dryRun.toString())
-        
-        if (this.dryRun) {
-          console.log('[Safety] dryRun enabled (debug mode only)')
-        } else {
-          console.log('[Settings] dryRun 已更新:', this.dryRun)
+        // 调试模式下允许保存（但建议不落盘或仅在 debug-only 文件中）
+        // 当前实现：仅在调试模式下才保存
+        if (this.debugModeEnabled) {
+          localStorage.setItem('eprinty_dry_run', this.dryRun.toString())
+          if (this.dryRun) {
+            console.log('[Safety] dryRun enabled (debug mode only)')
+          } else {
+            console.log('[Settings] dryRun 已更新:', this.dryRun)
+          }
         }
       } catch (err) {
         console.error('保存 dryRun 设置失败:', err)

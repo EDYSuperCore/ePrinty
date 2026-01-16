@@ -429,26 +429,55 @@ pub fn validate_printer_config_v2(config: &PrinterConfig) -> Result<(), String> 
     Ok(())
 }
 
-// 获取本地配置目录（Application Support/config）
-fn get_local_config_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    use tauri::api::path::app_data_dir;
+// 获取配置文件路径（统一入口，平台特定策略）
+// Windows: exe 同目录
+// macOS: Application Support 目录
+// 其他平台: Application Support 目录
+fn get_config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 只允许 exe 同目录
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("获取可执行文件路径失败: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| "无法获取可执行文件目录".to_string())?;
+        Ok(exe_dir.join(CONFIG_FILE_NAME))
+    }
     
-    let app_data = app_data_dir(&app.config())
-        .ok_or_else(|| "无法获取应用数据目录".to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: Application Support 目录
+        use tauri::api::path::app_config_dir;
+        
+        let app_config = app_config_dir(&app.config())
+            .ok_or_else(|| "无法获取应用配置目录".to_string())?;
+        
+        // 确保目录存在
+        fs::create_dir_all(&app_config)
+            .map_err(|e| format!("创建配置目录失败: {}", e))?;
+        
+        Ok(app_config.join(CONFIG_FILE_NAME))
+    }
     
-    let config_dir = app_data.join("config");
-    
-    // 确保目录存在
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("创建配置目录失败: {}", e))?;
-    
-    Ok(config_dir)
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // 其他平台: Application Support 目录
+        use tauri::api::path::app_config_dir;
+        
+        let app_config = app_config_dir(&app.config())
+            .ok_or_else(|| "无法获取应用配置目录".to_string())?;
+        
+        // 确保目录存在
+        fs::create_dir_all(&app_config)
+            .map_err(|e| format!("创建配置目录失败: {}", e))?;
+        
+        Ok(app_config.join(CONFIG_FILE_NAME))
+    }
 }
 
-// 获取本地配置文件路径（唯一可写配置源）
+// 保持向后兼容的别名（内部调用 get_config_path）
 fn get_local_config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let config_dir = get_local_config_dir(app)?;
-    Ok(config_dir.join(CONFIG_FILE_NAME))
+    get_config_path(app)
 }
 
 // 获取包内 seed 配置文件路径（只读）
@@ -509,11 +538,13 @@ fn get_seed_config_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 }
 
 // 从 seed 复制配置到本地（首次运行）
+// Windows: 只允许写入 exe 同目录，失败时明确报错
+// macOS: 写入 Application Support 目录
 fn seed_config_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
-    let local_config_path = get_local_config_path(app)?;
+    let config_path = get_config_path(app)?;
     
     // 如果本地配置已存在，不需要 seed
-    if local_config_path.exists() {
+    if config_path.exists() {
         eprintln!("[CONFIG_SEEDED] 本地配置已存在，跳过 seed");
         return Ok(());
     }
@@ -523,7 +554,7 @@ fn seed_config_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
         .ok_or_else(|| "未找到 seed 配置文件".to_string())?;
     
     eprintln!("[CONFIG_SEEDED] 从 seed 复制配置: {} -> {}", 
-        seed_path.display(), local_config_path.display());
+        seed_path.display(), config_path.display());
     
     // 读取 seed 配置
     let seed_content = fs::read_to_string(&seed_path)
@@ -533,74 +564,183 @@ fn seed_config_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     let _: PrinterConfig = serde_json::from_str(&seed_content)
         .map_err(|e| format!("解析 seed 配置文件失败: {}", e))?;
     
-    // 写入本地配置目录
-    fs::write(&local_config_path, seed_content)
-        .map_err(|e| format!("写入本地配置文件失败: {}", e))?;
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 只允许写入 exe 同目录
+        // 如果写入失败（例如无写权限），明确报错，不允许回退到 AppData
+        fs::write(&config_path, seed_content)
+            .map_err(|e| {
+                format!(
+                    "Windows 要求配置文件与 exe 同目录，但写入失败: {}。\n请手动放置 {} 到 {} 目录，或确保该目录有写权限。",
+                    e,
+                    CONFIG_FILE_NAME,
+                    config_path.parent().map(|p| p.display().to_string()).unwrap_or_else(|| "exe 目录".to_string())
+                )
+            })?;
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // macOS 和其他平台: 写入配置目录
+        // 确保目录存在
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("创建配置目录失败: {}", e))?;
+        }
+        
+        fs::write(&config_path, seed_content)
+            .map_err(|e| format!("写入本地配置文件失败: {}", e))?;
+    }
     
     eprintln!("[CONFIG_SEEDED] 配置已从 seed 复制到本地");
     Ok(())
 }
 
-// 获取缓存配置文件路径（Application Support 目录）- 保持向后兼容
-fn get_cache_config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    // 使用新的本地配置路径
-    get_local_config_path(app)
-}
 
-// 从缓存读取配置（只读，不进行网络请求）
+// 从缓存读取配置（本地优先，不存在时同步远程兜底）
 #[tauri::command]
 fn get_cached_config(app: tauri::AppHandle) -> Result<CachedConfigResult, String> {
     eprintln!("[CACHE_LOADED] 开始读取缓存配置");
     
-    // 步骤 1: 如果本地配置不存在，从 seed 复制
-    if let Err(e) = seed_config_if_needed(&app) {
-        eprintln!("[CACHE_LOADED] Seed 配置失败（可能首次运行且无 seed）: {}", e);
-        // 继续尝试读取，如果失败再报错
+    let config_path = get_config_path(&app)?;
+    
+    // 步骤 1: 如果本地配置存在，直接读取并返回
+    if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
+        
+        let config: PrinterConfig = serde_json::from_str(&content)
+            .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+        
+        // 验证配置完整性
+        validate_printer_config_v2(&config)?;
+        
+        // 获取文件修改时间作为时间戳
+        let timestamp = config_path.metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        
+        let config_version = config.version.clone();
+        
+        eprintln!("[CONFIG_LOADED] source=local path={} version={:?}", 
+            config_path.display(), config_version);
+        
+        return Ok(CachedConfigResult {
+            config,
+            source: "local".to_string(),
+            timestamp,
+            version: config_version,
+        });
     }
     
-    // 步骤 2: 从本地配置路径读取（唯一可写配置源）
-    let local_config_path = get_local_config_path(&app)?;
-    
-    if !local_config_path.exists() {
-        return Err(format!("未找到本地配置文件: {}", local_config_path.display()));
+    // 步骤 2: 本地不存在，尝试从 seed 复制
+    eprintln!("[CACHE_LOADED] 本地配置不存在，尝试从 seed 复制");
+    match seed_config_if_needed(&app) {
+        Ok(_) => {
+            // seed 复制成功，重新读取
+            let content = fs::read_to_string(&config_path)
+                .map_err(|e| format!("读取 seed 复制的配置文件失败: {}", e))?;
+            
+            let config: PrinterConfig = serde_json::from_str(&content)
+                .map_err(|e| format!("解析 seed 配置文件失败: {}", e))?;
+            
+            validate_printer_config_v2(&config)?;
+            
+            let timestamp = config_path.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            
+            let config_version = config.version.clone();
+            
+            eprintln!("[CONFIG_LOADED] source=seed path={} version={:?}", 
+                config_path.display(), config_version);
+            
+            return Ok(CachedConfigResult {
+                config,
+                source: "seed".to_string(),
+                timestamp,
+                version: config_version,
+            });
+        }
+        Err(seed_err) => {
+            eprintln!("[CACHE_LOADED] Seed 配置失败: {}", seed_err);
+            // 继续到步骤 3: 同步远程获取
+        }
     }
     
-    let content = fs::read_to_string(&local_config_path)
-        .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
+    // 步骤 3: seed 也不可用，必须同步拉取远程配置（首次启动兜底）
+    eprintln!("[CACHE_LOADED] 本地和 seed 都不可用，同步拉取远程配置");
     
-    let config: PrinterConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+    // 使用 tokio::runtime 在当前线程执行异步操作
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| format!("创建异步运行时失败: {}", e))?;
     
-    // 验证配置完整性
-    validate_printer_config_v2(&config)?;
+    let remote_config = rt.block_on(async {
+        // 使用较长的超时时间（10秒），因为这是首次启动的兜底操作
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            load_remote_config()
+        ).await
+    });
     
-    // 获取文件修改时间作为时间戳
-    let timestamp = local_config_path.metadata()
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs());
-    
-    // 在移动 config 之前先克隆 version
-    let config_version = config.version.clone();
-    
-    eprintln!("[CONFIG_LOADED] source=local path={} version={:?}", 
-        local_config_path.display(), config_version);
-    
-    Ok(CachedConfigResult {
-        config,
-        source: "local".to_string(),
-        timestamp,
-        version: config_version,
-    })
+    match remote_config {
+        Ok(Ok(config)) => {
+            // 远程获取成功，保存到本地
+            save_config_to_local(&config, &config_path)
+                .map_err(|e| format!("保存远程配置到本地失败: {}", e))?;
+            
+            let config_version = config.version.clone();
+            
+            eprintln!("[CONFIG_LOADED] source=remote_bootstrap path={} version={:?}", 
+                config_path.display(), config_version);
+            
+            Ok(CachedConfigResult {
+                config,
+                source: "remote_bootstrap".to_string(),
+                timestamp: None,
+                version: config_version,
+            })
+        }
+        Ok(Err(e)) => {
+            Err(format!("首次启动必须远程获取配置，但远程获取失败: {}", e))
+        }
+        Err(_) => {
+            Err("首次启动必须远程获取配置，但请求超时".to_string())
+        }
+    }
 }
 
-// 刷新远程配置并更新缓存
+// 刷新远程配置并更新缓存（仅版本变更才更新）
 #[tauri::command]
 async fn refresh_remote_config(app: tauri::AppHandle) -> Result<RefreshConfigResult, String> {
     eprintln!("[REMOTE_REFRESH_START] 开始刷新远程配置");
     
-    // 使用超时（2000-3000ms）
+    let config_path = get_config_path(&app)?;
+    
+    // 读取本地配置版本（如果存在）
+    let local_version = if config_path.exists() {
+        match fs::read_to_string(&config_path) {
+            Ok(content) => {
+                match serde_json::from_str::<PrinterConfig>(&content) {
+                    Ok(config) => config.version.clone(),
+                    Err(_) => {
+                        eprintln!("[REMOTE_REFRESH] 本地配置文件格式错误，将尝试更新");
+                        None
+                    }
+                }
+            }
+            Err(_) => None
+        }
+    } else {
+        // 本地文件不存在，允许更新
+        None
+    };
+    
+    // 使用超时（3秒）
     let remote_result = tokio::time::timeout(
         std::time::Duration::from_millis(3000),
         load_remote_config()
@@ -610,56 +750,86 @@ async fn refresh_remote_config(app: tauri::AppHandle) -> Result<RefreshConfigRes
         Ok(Ok(remote_config)) => {
             let remote_version = remote_config.version.clone();
             
-            // 保存到本地配置路径（使用原子写）
-            let local_config_path = get_local_config_path(&app)?;
-            match save_config_to_local(&remote_config, &local_config_path) {
-                Ok(_) => {
-                    eprintln!("[REMOTE_REFRESH_OK] 远程配置已更新到本地 version={:?} path={}", 
-                        remote_version, local_config_path.display());
-                    
-                    // 发送配置更新事件
-                    let payload = serde_json::json!({
-                        "version": remote_version,
-                        "config": remote_config,
-                    });
-                    
-                    if let Err(e) = app.emit_all("config_updated", payload) {
-                        eprintln!("[WARN] 发送 config_updated 事件失败: {}", e);
-                    }
-                    
-                    Ok(RefreshConfigResult {
-                        success: true,
-                        error: None,
-                        version: remote_version,
-                    })
+            // 版本比较策略
+            let should_update = match (&local_version, &remote_version) {
+                // 本地版本存在且远程版本 <= 本地版本：不更新
+                (Some(local_v), Some(remote_v)) => {
+                    // 简单的字符串比较（假设版本号格式一致）
+                    // 如果需要语义化版本比较，可以使用 semver crate
+                    remote_v > local_v
                 }
-                Err(save_err) => {
-                    let error_msg = format!("保存缓存失败: {}", save_err);
-                    eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
-                    
-                    // 即使保存失败，也发送更新事件（配置已在内存中）
-                    let payload = serde_json::json!({
-                        "version": remote_version,
-                        "config": remote_config,
-                    });
-                    
-                    if let Err(e) = app.emit_all("config_updated", payload) {
-                        eprintln!("[WARN] 发送 config_updated 事件失败: {}", e);
-                    }
-                    
-                    Ok(RefreshConfigResult {
-                        success: true, // 虽然保存失败，但配置已加载
-                        error: Some(error_msg),
-                        version: remote_version,
-                    })
+                // 本地版本不存在（但文件存在）：默认需要更新（引入版本字段）
+                (None, _) => {
+                    eprintln!("[REMOTE_REFRESH] 本地配置缺少版本字段，将更新以引入版本");
+                    true
                 }
+                // 远程版本不存在：不更新（保持本地）
+                (_, None) => {
+                    eprintln!("[REMOTE_REFRESH] 远程配置缺少版本字段，跳过更新");
+                    false
+                }
+            };
+            
+            if should_update {
+                eprintln!("[REMOTE_REFRESH] 远程版本更高，将更新本地配置 local={:?} remote={:?}", 
+                    local_version, remote_version);
+                
+                // 使用原子替换（save_config_to_local 已实现）
+                match save_config_to_local(&remote_config, &config_path) {
+                    Ok(_) => {
+                        eprintln!("[REMOTE_REFRESH_OK] 远程配置已更新到本地 version={:?} path={}", 
+                            remote_version, config_path.display());
+                        
+                        // 发送配置更新事件
+                        let payload = serde_json::json!({
+                            "version": remote_version,
+                            "config": remote_config,
+                            "updated": true,
+                        });
+                        
+                        if let Err(e) = app.emit_all("config_updated", payload) {
+                            eprintln!("[WARN] 发送 config_updated 事件失败: {}", e);
+                        }
+                        
+                        Ok(RefreshConfigResult {
+                            success: true,
+                            error: None,
+                            version: remote_version,
+                        })
+                    }
+                    Err(save_err) => {
+                        let error_msg = format!("保存配置失败: {}", save_err);
+                        eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
+                        
+                        // 发送刷新失败事件
+                        let payload = serde_json::json!({
+                            "error": error_msg.clone(),
+                        });
+                        
+                        if let Err(emit_err) = app.emit_all("config_refresh_failed", payload) {
+                            eprintln!("[WARN] 发送 config_refresh_failed 事件失败: {}", emit_err);
+                        }
+                        
+                        Err(error_msg)
+                    }
+                }
+            } else {
+                eprintln!("[REMOTE_REFRESH] 远程版本未提升，跳过更新 local={:?} remote={:?}", 
+                    local_version, remote_version);
+                
+                // 不落盘、不发送 config_updated 事件
+                Ok(RefreshConfigResult {
+                    success: true,
+                    error: None,
+                    version: remote_version,
+                })
             }
         }
         Ok(Err(e)) => {
             let error_msg = format!("远程配置加载失败: {}", e);
             eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
             
-            // 发送刷新失败事件
+            // 发送刷新失败事件（不影响已加载的本地配置）
             let payload = serde_json::json!({
                 "error": error_msg.clone(),
             });
@@ -674,7 +844,7 @@ async fn refresh_remote_config(app: tauri::AppHandle) -> Result<RefreshConfigRes
             let error_msg = "远程配置加载超时".to_string();
             eprintln!("[REMOTE_REFRESH_FAIL] {}", error_msg);
             
-            // 发送刷新失败事件
+            // 发送刷新失败事件（不影响已加载的本地配置）
             let payload = serde_json::json!({
                 "error": error_msg.clone(),
             });
@@ -689,61 +859,80 @@ async fn refresh_remote_config(app: tauri::AppHandle) -> Result<RefreshConfigRes
 }
 
 // 加载本地配置文件，返回配置和文件路径
-// 注意：此函数需要 AppHandle 来获取正确的本地配置路径
-// 为了保持向后兼容，保留此函数但优先使用 get_cached_config
+// 注意：此函数没有 AppHandle，用于 Windows 平台模块等场景
+// Windows: 只搜索 exe 同目录
+// macOS/其他: 搜索多个路径（开发模式兼容）
 pub fn load_local_config() -> Result<(PrinterConfig, std::path::PathBuf), String> {
     use std::path::PathBuf;
     
-    // 优先：尝试从 Application Support/config 读取（生产环境）
-    // 注意：此函数没有 AppHandle，无法直接获取 app_data_dir
-    // 因此回退到旧的搜索逻辑（主要用于开发模式）
-    
-    // 尝试从多个可能的位置加载本地配置
-    // 优先级：1. 可执行文件所在目录（应用目录）- 最高优先级
-    //         2. 当前工作目录
-    //         3. 项目根目录（开发模式）
-    
-    let mut search_paths: Vec<PathBuf> = vec![];
-    
-    // 优先：可执行文件所在目录（打包后的应用会在这里查找）
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            search_paths.push(exe_dir.join(CONFIG_FILE_NAME));
-        }
-    }
-    
-    // 其次：当前工作目录
-    if let Ok(current_dir) = std::env::current_dir() {
-        search_paths.push(current_dir.join(CONFIG_FILE_NAME));
-        // 也尝试上级目录（开发模式下可能在 src-tauri 目录运行）
-        if let Some(parent) = current_dir.parent() {
-            search_paths.push(parent.join(CONFIG_FILE_NAME));
-        }
-    }
-    
-    // 尝试所有可能的路径
-    for config_path in &search_paths {
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 只允许 exe 同目录
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("获取可执行文件路径失败: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| "无法获取可执行文件目录".to_string())?;
+        let config_path = exe_dir.join(CONFIG_FILE_NAME);
+        
         if config_path.exists() {
-            let content = fs::read_to_string(config_path)
+            let content = fs::read_to_string(&config_path)
                 .map_err(|e| format!("读取本地配置文件失败 ({}): {}", config_path.display(), e))?;
             
             let config: PrinterConfig = serde_json::from_str(&content)
                 .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
             
-            // 【强校验】验证配置完整性
             validate_printer_config_v2(&config)?;
             
-            return Ok((config, config_path.clone()));
+            return Ok((config, config_path));
         }
+        
+        return Err(format!("未找到本地配置文件: {}。Windows 要求配置文件与 exe 同目录。", config_path.display()));
     }
     
-    // 如果没有找到，返回详细错误信息
-    let mut error_msg = format!("未找到本地配置文件 {}。已搜索以下位置：\n", CONFIG_FILE_NAME);
-    for path in search_paths {
-        error_msg.push_str(&format!("  - {}\n", path.display()));
+    #[cfg(not(target_os = "windows"))]
+    {
+        // macOS/其他平台: 搜索多个路径（开发模式兼容）
+        let mut search_paths: Vec<PathBuf> = vec![];
+        
+        // 优先：可执行文件所在目录
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                search_paths.push(exe_dir.join(CONFIG_FILE_NAME));
+            }
+        }
+        
+        // 其次：当前工作目录
+        if let Ok(current_dir) = std::env::current_dir() {
+            search_paths.push(current_dir.join(CONFIG_FILE_NAME));
+            // 也尝试上级目录（开发模式下可能在 src-tauri 目录运行）
+            if let Some(parent) = current_dir.parent() {
+                search_paths.push(parent.join(CONFIG_FILE_NAME));
+            }
+        }
+        
+        // 尝试所有可能的路径
+        for config_path in &search_paths {
+            if config_path.exists() {
+                let content = fs::read_to_string(config_path)
+                    .map_err(|e| format!("读取本地配置文件失败 ({}): {}", config_path.display(), e))?;
+                
+                let config: PrinterConfig = serde_json::from_str(&content)
+                    .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
+                
+                validate_printer_config_v2(&config)?;
+                
+                return Ok((config, config_path.clone()));
+            }
+        }
+        
+        // 如果没有找到，返回详细错误信息
+        let mut error_msg = format!("未找到本地配置文件 {}。已搜索以下位置：\n", CONFIG_FILE_NAME);
+        for path in search_paths {
+            error_msg.push_str(&format!("  - {}\n", path.display()));
+        }
+        
+        Err(error_msg)
     }
-    
-    Err(error_msg)
 }
 
 /// 推导有效驱动规格
@@ -935,23 +1124,35 @@ fn config_different(local: &PrinterConfig, remote: &PrinterConfig) -> bool {
 // 注意：此函数保持向后兼容，但推荐使用 get_cached_config + refresh_remote_config
 #[tauri::command]
 async fn load_config(app: tauri::AppHandle) -> Result<LoadConfigResult, String> {
-    // 优先加载本地配置（使用新的本地配置路径）
-    // 如果本地配置不存在，尝试从 seed 复制
-    if let Err(e) = seed_config_if_needed(&app) {
-        eprintln!("[load_config] Seed 配置失败: {}", e);
-    }
+    // 使用统一的配置路径策略
+    let config_path = get_config_path(&app)?;
     
-    let local_config_path = get_local_config_path(&app)?;
-    let load_result = if local_config_path.exists() {
-        let content = fs::read_to_string(&local_config_path)
+    // 优先加载本地配置
+    let load_result = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("读取本地配置文件失败: {}", e))?;
         let config: PrinterConfig = serde_json::from_str(&content)
             .map_err(|e| format!("解析本地配置文件失败: {}", e))?;
         validate_printer_config_v2(&config)?;
-        Ok((config, local_config_path))
+        Ok((config, config_path))
     } else {
-        // 回退到旧的 load_local_config（开发模式兼容）
-        load_local_config()
+        // 本地不存在，尝试 seed 或回退到 load_local_config（无 AppHandle 场景）
+        if let Err(e) = seed_config_if_needed(&app) {
+            eprintln!("[load_config] Seed 配置失败: {}", e);
+        }
+        
+        // 再次检查是否已通过 seed 创建
+        if config_path.exists() {
+            let content = fs::read_to_string(&config_path)
+                .map_err(|e| format!("读取 seed 配置文件失败: {}", e))?;
+            let config: PrinterConfig = serde_json::from_str(&content)
+                .map_err(|e| format!("解析 seed 配置文件失败: {}", e))?;
+            validate_printer_config_v2(&config)?;
+            Ok((config, config_path))
+        } else {
+            // 回退到 load_local_config（无 AppHandle 场景，如 Windows 平台模块）
+            load_local_config()
+        }
     };
     
     match load_result {

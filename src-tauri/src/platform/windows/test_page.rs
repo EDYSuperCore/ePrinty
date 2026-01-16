@@ -8,28 +8,54 @@ pub fn print_test_page_windows(printer_name: String) -> Result<String, String> {
     eprintln!("[PrintTestPage] START printer_name=\"{}\"", printer_name);
     
     // 先验证打印机是否存在（仅一次检查）
-    // 修复：使用 Where-Object 精确过滤，避免 Get-Printer -Name 的通配符匹配导致误判
-    let escaped_printer_name = printer_name.replace("'", "''");
-    let check_script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $q = '{}'; $printer = Get-Printer -Name $q -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -eq $q }} | Select-Object -ExpandProperty Name",
-        escaped_printer_name
-    );
-    
-    let printer_exists = match crate::platform::windows::ps::run_powershell(&check_script) {
-        Ok(output) => {
-            let stdout = crate::platform::windows::encoding::decode_windows_string(&output.stdout);
-            let exit_code = output.status.code();
-            // 二次确认：验证返回的名称是否完全等于 printer_name
-            let exists = exit_code == Some(0) 
-                && !stdout.trim().is_empty() 
-                && stdout.trim() == printer_name;
-            eprintln!("[PrintTestPage] CHECK_EXISTS result exists={} exit_code={:?} stdout=\"{}\" expected=\"{}\"", 
-                exists, exit_code, stdout.trim(), printer_name);
-            exists
+    // Windows 平台：使用 Win32 Print Spooler API (OpenPrinterW) 判断
+    // 非 Windows 平台：保持原有 PowerShell 检查逻辑（通过 cfg 条件编译）
+    #[cfg(target_os = "windows")]
+    let printer_exists = {
+        let (exists, last_error, evidence) = crate::platform::windows::printer_exists::printer_exists(&printer_name);
+        
+        // 记录日志（包含 source 和 evidence）
+        if let Some(ev) = &evidence {
+            if exists {
+                eprintln!("[PrintTestPage] CHECK_EXISTS result exists=true source=win32 evidence=\"{}\" expected=\"{}\"", 
+                    ev, printer_name);
+            } else {
+                eprintln!("[PrintTestPage] CHECK_EXISTS result exists=false source=win32 last_error={:?} evidence=\"{}\" expected=\"{}\"", 
+                    last_error, ev, printer_name);
+            }
+        } else {
+            eprintln!("[PrintTestPage] CHECK_EXISTS result exists={} source=win32 expected=\"{}\"", 
+                exists, printer_name);
         }
-        Err(e) => {
-            eprintln!("[PrintTestPage] CHECK_EXISTS result exists=false error=\"{}\"", e);
-            false
+        
+        exists
+    };
+    
+    // 非 Windows 平台：保持原有 PowerShell 检查逻辑
+    #[cfg(not(target_os = "windows"))]
+    let printer_exists = {
+        let escaped_printer_name = printer_name.replace("'", "''");
+        let check_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $q = '{}'; $printer = Get-Printer -Name $q -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -eq $q }} | Select-Object -ExpandProperty Name",
+            escaped_printer_name
+        );
+        
+        match crate::platform::windows::ps::run_powershell(&check_script) {
+            Ok(output) => {
+                let stdout = crate::platform::windows::encoding::decode_windows_string(&output.stdout);
+                let exit_code = output.status.code();
+                // 二次确认：验证返回的名称是否完全等于 printer_name
+                let exists = exit_code == Some(0) 
+                    && !stdout.trim().is_empty() 
+                    && stdout.trim() == printer_name;
+                eprintln!("[PrintTestPage] CHECK_EXISTS result exists={} exit_code={:?} stdout=\"{}\" expected=\"{}\"", 
+                    exists, exit_code, stdout.trim(), printer_name);
+                exists
+            }
+            Err(e) => {
+                eprintln!("[PrintTestPage] CHECK_EXISTS result exists=false error=\"{}\"", e);
+                false
+            }
         }
     };
     

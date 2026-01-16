@@ -1,42 +1,42 @@
-ï»¿# PowerShell è„šæœ¬ï¼šåœ¨æ„å»ºååµŒå…¥ Windows manifestï¼ˆè¯·æ±‚ç®¡ç†å‘˜æƒé™ï¼‰
-# ä½¿ç”¨æ–¹æ³•ï¼šåœ¨æ„å»ºå®Œæˆåè¿è¡Œæ­¤è„šæœ¬
+# PowerShell ½Å±¾£ºÔÚ¹¹½¨ºóÇ¶Èë Windows manifest£¨ÇëÇó¹ÜÀíÔ±È¨ÏŞ£©
+# Ê¹ÓÃ·½·¨£ºÔÚ¹¹½¨Íê³ÉºóÔËĞĞ´Ë½Å±¾
 # ./embed_manifest.ps1 -ExePath "target/release/easy-printer.exe"
 
 param(
     [string]$ExePath = ""
 )
 
-# è·å–è„šæœ¬æ‰€åœ¨ç›®å½•ï¼ˆsrc-tauri ç›®å½•ï¼‰
+# »ñÈ¡½Å±¾ËùÔÚÄ¿Â¼£¨src-tauri Ä¿Â¼£©
 $ScriptDir = if ($MyInvocation.MyCommand.Path) {
     Split-Path -Parent $MyInvocation.MyCommand.Path
 } else {
     Split-Path -Parent $PSCommandPath
 }
 
-# å¦‚æœå½“å‰ç›®å½•ä¸æ˜¯ src-tauriï¼Œåˆ™åˆ‡æ¢åˆ°è„šæœ¬ç›®å½•
+# Èç¹ûµ±Ç°Ä¿Â¼²»ÊÇ src-tauri£¬ÔòÇĞ»»µ½½Å±¾Ä¿Â¼
 $CurrentTargetPath = Join-Path $PWD "target"
 $ScriptTargetPath = Join-Path $ScriptDir "target"
 
 if (-not (Test-Path $CurrentTargetPath)) {
     if (Test-Path $ScriptTargetPath) {
         Set-Location $ScriptDir
-        Write-Host "å·²åˆ‡æ¢åˆ°è„šæœ¬ç›®å½•: $ScriptDir" -ForegroundColor Cyan
+        Write-Host "ÒÑÇĞ»»µ½½Å±¾Ä¿Â¼: $ScriptDir" -ForegroundColor Cyan
     } else {
-        Write-Warning "å½“å‰ç›®å½•å’Œè„šæœ¬ç›®å½•éƒ½æ‰¾ä¸åˆ° target ç›®å½•"
-        Write-Warning "å½“å‰ç›®å½•: $PWD"
-        Write-Warning "è„šæœ¬ç›®å½•: $ScriptDir"
+        Write-Warning "µ±Ç°Ä¿Â¼ºÍ½Å±¾Ä¿Â¼¶¼ÕÒ²»µ½ target Ä¿Â¼"
+        Write-Warning "µ±Ç°Ä¿Â¼: $PWD"
+        Write-Warning "½Å±¾Ä¿Â¼: $ScriptDir"
     }
 }
 
 if ([string]::IsNullOrEmpty($ExePath)) {
-    # å¦‚æœæ²¡æœ‰æŒ‡å®šè·¯å¾„ï¼Œå°è¯•è‡ªåŠ¨æŸ¥æ‰¾
-    # é¦–å…ˆå°è¯• Release ç›®å½•
+    # Èç¹ûÃ»ÓĞÖ¸¶¨Â·¾¶£¬³¢ÊÔ×Ô¶¯²éÕÒ
+    # Ê×ÏÈ³¢ÊÔ Release Ä¿Â¼
     $ReleaseDir = Join-Path $PWD "target\release"
     $DebugDir = Join-Path $PWD "target\debug"
     
-    # æŸ¥æ‰¾ Release ç›®å½•ä¸­çš„ exe æ–‡ä»¶ï¼ˆTauri ç”Ÿæˆçš„æ–‡ä»¶åå¯èƒ½ä¸åŒï¼‰
+    # ²éÕÒ Release Ä¿Â¼ÖĞµÄ exe ÎÄ¼ş£¨Tauri Éú³ÉµÄÎÄ¼şÃû¿ÉÄÜ²»Í¬£©
     if (Test-Path $ReleaseDir) {
-        Write-Host "æ­£åœ¨æœç´¢ Release ç›®å½•: $ReleaseDir" -ForegroundColor Cyan
+        Write-Host "ÕıÔÚËÑË÷ Release Ä¿Â¼: $ReleaseDir" -ForegroundColor Cyan
         $exeFiles = Get-ChildItem -Path $ReleaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue | Where-Object { 
             $_.Name -notlike "*deps*" -and 
             $_.Name -notlike "*build*" -and
@@ -45,15 +45,15 @@ if ([string]::IsNullOrEmpty($ExePath)) {
         }
         
         if ($exeFiles) {
-            Write-Host "æ‰¾åˆ° $($exeFiles.Count) ä¸ª exe æ–‡ä»¶" -ForegroundColor Gray
-            # ä¼˜å…ˆé€‰æ‹©ä¸»ç¨‹åº exeï¼ˆä¸æ˜¯ä¾èµ–é¡¹ï¼Œé€šå¸¸åœ¨ release æ ¹ç›®å½•ï¼‰
+            Write-Host "ÕÒµ½ $($exeFiles.Count) ¸ö exe ÎÄ¼ş" -ForegroundColor Gray
+            # ÓÅÏÈÑ¡ÔñÖ÷³ÌĞò exe£¨²»ÊÇÒÀÀµÏî£¬Í¨³£ÔÚ release ¸ùÄ¿Â¼£©
             $mainExe = $exeFiles | Where-Object { 
                 $_.DirectoryName -eq $ReleaseDir -and
                 $_.Name -notmatch "^[a-f0-9]{16}"
             } | Select-Object -First 1
             
             if (-not $mainExe) {
-                # å¦‚æœæ ¹ç›®å½•æ²¡æ‰¾åˆ°ï¼Œå°è¯•åœ¨æ‰€æœ‰æ–‡ä»¶ä¸­æ‰¾
+                # Èç¹û¸ùÄ¿Â¼Ã»ÕÒµ½£¬³¢ÊÔÔÚËùÓĞÎÄ¼şÖĞÕÒ
                 $mainExe = $exeFiles | Where-Object { 
                     $_.Name -notmatch "^[a-f0-9]{16}"
                 } | Select-Object -First 1
@@ -65,16 +65,16 @@ if ([string]::IsNullOrEmpty($ExePath)) {
             
             if ($mainExe) {
                 $ExePath = $mainExe.FullName
-                Write-Host "æ‰¾åˆ° Release ç‰ˆæœ¬: $ExePath" -ForegroundColor Green
+                Write-Host "ÕÒµ½ Release °æ±¾: $ExePath" -ForegroundColor Green
             }
         } else {
-            Write-Host "Release ç›®å½•ä¸­æœªæ‰¾åˆ°ç¬¦åˆæ¡ä»¶çš„ exe æ–‡ä»¶" -ForegroundColor Gray
+            Write-Host "Release Ä¿Â¼ÖĞÎ´ÕÒµ½·ûºÏÌõ¼şµÄ exe ÎÄ¼ş" -ForegroundColor Gray
         }
     }
     
-    # å¦‚æœ Release æœªæ‰¾åˆ°ï¼Œå°è¯• Debug ç›®å½•
+    # Èç¹û Release Î´ÕÒµ½£¬³¢ÊÔ Debug Ä¿Â¼
     if ([string]::IsNullOrEmpty($ExePath) -and (Test-Path $DebugDir)) {
-        Write-Host "æ­£åœ¨æœç´¢ Debug ç›®å½•: $DebugDir" -ForegroundColor Cyan
+        Write-Host "ÕıÔÚËÑË÷ Debug Ä¿Â¼: $DebugDir" -ForegroundColor Cyan
         $exeFiles = Get-ChildItem -Path $DebugDir -Filter "*.exe" -File -ErrorAction SilentlyContinue | Where-Object { 
             $_.Name -notlike "*deps*" -and 
             $_.Name -notlike "*build*" -and
@@ -83,7 +83,7 @@ if ([string]::IsNullOrEmpty($ExePath)) {
         }
         
         if ($exeFiles) {
-            Write-Host "æ‰¾åˆ° $($exeFiles.Count) ä¸ª exe æ–‡ä»¶" -ForegroundColor Gray
+            Write-Host "ÕÒµ½ $($exeFiles.Count) ¸ö exe ÎÄ¼ş" -ForegroundColor Gray
             $mainExe = $exeFiles | Where-Object { 
                 $_.DirectoryName -eq $DebugDir -and
                 $_.Name -notmatch "^[a-f0-9]{16}"
@@ -101,61 +101,61 @@ if ([string]::IsNullOrEmpty($ExePath)) {
             
             if ($mainExe) {
                 $ExePath = $mainExe.FullName
-                Write-Host "æ‰¾åˆ° Debug ç‰ˆæœ¬: $ExePath" -ForegroundColor Yellow
+                Write-Host "ÕÒµ½ Debug °æ±¾: $ExePath" -ForegroundColor Yellow
             }
         } else {
-            Write-Host "Debug ç›®å½•ä¸­æœªæ‰¾åˆ°ç¬¦åˆæ¡ä»¶çš„ exe æ–‡ä»¶" -ForegroundColor Gray
+            Write-Host "Debug Ä¿Â¼ÖĞÎ´ÕÒµ½·ûºÏÌõ¼şµÄ exe ÎÄ¼ş" -ForegroundColor Gray
         }
     }
     
     if ([string]::IsNullOrEmpty($ExePath)) {
-        Write-Host "æœªæ‰¾åˆ° exe æ–‡ä»¶ï¼Œè¯·æ‰‹åŠ¨æŒ‡å®šè·¯å¾„ã€‚ä¾‹å¦‚ï¼š" -ForegroundColor Red
+        Write-Host "Î´ÕÒµ½ exe ÎÄ¼ş£¬ÇëÊÖ¶¯Ö¸¶¨Â·¾¶¡£ÀıÈç£º" -ForegroundColor Red
         Write-Host "  .\embed_manifest.ps1 -ExePath `"target\release\ePrinty.exe`"" -ForegroundColor Yellow
         Write-Host "  .\embed_manifest.ps1 -ExePath `"target\debug\ePrinty.exe`"" -ForegroundColor Yellow
         exit 1
     }
 }
 
-# å¦‚æœ ExePath æ˜¯ç›¸å¯¹è·¯å¾„ï¼Œç¡®ä¿åŸºäºå½“å‰ç›®å½•
+# Èç¹û ExePath ÊÇÏà¶ÔÂ·¾¶£¬È·±£»ùÓÚµ±Ç°Ä¿Â¼
 if (-not [System.IO.Path]::IsPathRooted($ExePath)) {
     $ExePath = Join-Path $PWD $ExePath
 }
 
 if (-not (Test-Path $ExePath)) {
-    Write-Error "æŒ‡å®šçš„ exe æ–‡ä»¶ä¸å­˜åœ¨: $ExePath"
+    Write-Error "Ö¸¶¨µÄ exe ÎÄ¼ş²»´æÔÚ: $ExePath"
     exit 1
 }
 
-# æ£€æŸ¥æ–‡ä»¶æ˜¯å¦è¢«å ç”¨ï¼ˆå°è¯•ä»¥å†™å…¥æ¨¡å¼æ‰“å¼€ï¼‰
+# ¼ì²éÎÄ¼şÊÇ·ñ±»Õ¼ÓÃ£¨³¢ÊÔÒÔĞ´ÈëÄ£Ê½´ò¿ª£©
 try {
     $fileStream = [System.IO.File]::Open($ExePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
     $fileStream.Close()
     $fileStream.Dispose()
 } catch {
-    Write-Error "æ— æ³•è®¿é—® exe æ–‡ä»¶ï¼Œæ–‡ä»¶å¯èƒ½è¢«å ç”¨: $ExePath"
-    Write-Error "è¯·ç¡®ä¿ï¼š"
-    Write-Error "  1. ePrinty.exe æ²¡æœ‰æ­£åœ¨è¿è¡Œ"
-    Write-Error "  2. æ²¡æœ‰å…¶ä»–ç¨‹åºæ­£åœ¨ä½¿ç”¨è¯¥æ–‡ä»¶"
-    Write-Error "  3. ä»¥ç®¡ç†å‘˜æƒé™è¿è¡Œ PowerShell"
+    Write-Error "ÎŞ·¨·ÃÎÊ exe ÎÄ¼ş£¬ÎÄ¼ş¿ÉÄÜ±»Õ¼ÓÃ: $ExePath"
+    Write-Error "ÇëÈ·±££º"
+    Write-Error "  1. ePrinty.exe Ã»ÓĞÕıÔÚÔËĞĞ"
+    Write-Error "  2. Ã»ÓĞÆäËû³ÌĞòÕıÔÚÊ¹ÓÃ¸ÃÎÄ¼ş"
+    Write-Error "  3. ÒÔ¹ÜÀíÔ±È¨ÏŞÔËĞĞ PowerShell"
     exit 1
 }
 
-# æ£€æŸ¥æ˜¯å¦æœ‰ç®¡ç†å‘˜æƒé™
+# ¼ì²éÊÇ·ñÓĞ¹ÜÀíÔ±È¨ÏŞ
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Warning "å½“å‰æœªä»¥ç®¡ç†å‘˜æƒé™è¿è¡Œ PowerShell"
-    Write-Warning "åµŒå…¥ manifest å¯èƒ½éœ€è¦ç®¡ç†å‘˜æƒé™"
-    Write-Warning "å»ºè®®ï¼šå³é”®ç‚¹å‡» PowerShellï¼Œé€‰æ‹©'ä»¥ç®¡ç†å‘˜èº«ä»½è¿è¡Œ'"
-    $continue = Read-Host "æ˜¯å¦ç»§ç»­å°è¯•ï¼Ÿ(Y/N)"
+    Write-Warning "µ±Ç°Î´ÒÔ¹ÜÀíÔ±È¨ÏŞÔËĞĞ PowerShell"
+    Write-Warning "Ç¶Èë manifest ¿ÉÄÜĞèÒª¹ÜÀíÔ±È¨ÏŞ"
+    Write-Warning "½¨Òé£ºÓÒ¼üµã»÷ PowerShell£¬Ñ¡Ôñ'ÒÔ¹ÜÀíÔ±Éí·İÔËĞĞ'"
+    $continue = Read-Host "ÊÇ·ñ¼ÌĞø³¢ÊÔ£¿(Y/N)"
     if ($continue -ne "Y" -and $continue -ne "y") {
-        Write-Host "å·²å–æ¶ˆ" -ForegroundColor Yellow
+        Write-Host "ÒÑÈ¡Ïû" -ForegroundColor Yellow
         exit 0
     }
 }
 
-# Manifest è·¯å¾„ä¹ŸåŸºäºå½“å‰ç›®å½•
+# Manifest Â·¾¶Ò²»ùÓÚµ±Ç°Ä¿Â¼
 $ManifestPath = "app.manifest"
-# å¦‚æœå½“å‰ç›®å½•æ²¡æœ‰ï¼Œå°è¯•è„šæœ¬ç›®å½•
+# Èç¹ûµ±Ç°Ä¿Â¼Ã»ÓĞ£¬³¢ÊÔ½Å±¾Ä¿Â¼
 if (-not (Test-Path $ManifestPath)) {
     $ScriptManifestPath = Join-Path $ScriptDir "app.manifest"
     if (Test-Path $ScriptManifestPath) {
@@ -163,14 +163,14 @@ if (-not (Test-Path $ManifestPath)) {
     }
 }
 if (-not (Test-Path $ManifestPath)) {
-    Write-Error "manifest æ–‡ä»¶ä¸å­˜åœ¨: $ManifestPath"
+    Write-Error "manifest ÎÄ¼ş²»´æÔÚ: $ManifestPath"
     exit 1
 }
 
-Write-Host "æ­£åœ¨åµŒå…¥ manifest åˆ°: $ExePath"
-Write-Host "ä½¿ç”¨ manifest: $ManifestPath"
+Write-Host "ÕıÔÚÇ¶Èë manifest µ½: $ExePath"
+Write-Host "Ê¹ÓÃ manifest: $ManifestPath"
 
-# æ£€æŸ¥æ˜¯å¦æœ‰ mt.exeï¼ˆWindows SDK å·¥å…·ï¼‰
+# ¼ì²éÊÇ·ñÓĞ mt.exe£¨Windows SDK ¹¤¾ß£©
 $MtPath = $null
 $PossiblePaths = @(
     "C:\Program Files (x86)\Windows Kits\10\bin\10.0.*\x64\mt.exe",
@@ -182,45 +182,45 @@ foreach ($pattern in $PossiblePaths) {
     $found = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) {
         $MtPath = $found.FullName
-        Write-Host "æ‰¾åˆ° mt.exe: $MtPath"
+        Write-Host "ÕÒµ½ mt.exe: $MtPath"
         break
     }
 }
 
 if ($null -eq $MtPath) {
-    Write-Warning "æœªæ‰¾åˆ° mt.exeï¼Œæ— æ³•è‡ªåŠ¨åµŒå…¥ manifest"
-    Write-Warning "è¯·æ‰‹åŠ¨å®‰è£… Windows SDKï¼Œæˆ–ä½¿ç”¨ Resource Hacker ç­‰å·¥å…·"
-    Write-Warning "æˆ–è€…å³é”®ç‚¹å‡» exe -> å±æ€§ -> å…¼å®¹æ€§ -> ä»¥ç®¡ç†å‘˜èº«ä»½è¿è¡Œæ­¤ç¨‹åº"
+    Write-Warning "Î´ÕÒµ½ mt.exe£¬ÎŞ·¨×Ô¶¯Ç¶Èë manifest"
+    Write-Warning "ÇëÊÖ¶¯°²×° Windows SDK£¬»òÊ¹ÓÃ Resource Hacker µÈ¹¤¾ß"
+    Write-Warning "»òÕßÓÒ¼üµã»÷ exe -> ÊôĞÔ -> ¼æÈİĞÔ -> ÒÔ¹ÜÀíÔ±Éí·İÔËĞĞ´Ë³ÌĞò"
     exit 1
 }
 
-# ä½¿ç”¨ mt.exe åµŒå…¥ manifest
-Write-Host "æ­£åœ¨åµŒå…¥ manifest..." -ForegroundColor Cyan
+# Ê¹ÓÃ mt.exe Ç¶Èë manifest
+Write-Host "ÕıÔÚÇ¶Èë manifest..." -ForegroundColor Cyan
 try {
-    # ä½¿ç”¨ -nologo å‚æ•°å‡å°‘è¾“å‡ºï¼Œå¹¶æ•è·æ‰€æœ‰è¾“å‡º
+    # Ê¹ÓÃ -nologo ²ÎÊı¼õÉÙÊä³ö£¬²¢²¶»ñËùÓĞÊä³ö
     $result = & $MtPath -nologo -manifest $ManifestPath -outputresource:"$ExePath;1" 2>&1
     $exitCode = $LASTEXITCODE
     
     if ($exitCode -eq 0) {
-        Write-Host "âœ“ æˆåŠŸåµŒå…¥ manifestï¼" -ForegroundColor Green
-        Write-Host "ç°åœ¨åº”ç”¨å°†ä»¥ç®¡ç†å‘˜æƒé™è¿è¡Œ" -ForegroundColor Green
+        Write-Host "?? ³É¹¦Ç¶Èë manifest£¡" -ForegroundColor Green
+        Write-Host "ÏÖÔÚÓ¦ÓÃ½«ÒÔ¹ÜÀíÔ±È¨ÏŞÔËĞĞ" -ForegroundColor Green
     } else {
-        Write-Error "åµŒå…¥ manifest å¤±è´¥ (é€€å‡ºä»£ç : $exitCode)"
-        Write-Error "é”™è¯¯ä¿¡æ¯: $result"
+        Write-Error "Ç¶Èë manifest Ê§°Ü (ÍË³ö´úÂë: $exitCode)"
+        Write-Error "´íÎóĞÅÏ¢: $result"
         Write-Host ""
-        Write-Host "å¯èƒ½çš„è§£å†³æ–¹æ¡ˆï¼š" -ForegroundColor Yellow
-        Write-Host "  1. ç¡®ä¿ ePrinty.exe æ²¡æœ‰æ­£åœ¨è¿è¡Œ" -ForegroundColor Yellow
-        Write-Host "  2. å…³é—­æ‰€æœ‰å¯èƒ½å ç”¨è¯¥æ–‡ä»¶çš„ç¨‹åºï¼ˆå¦‚æ€æ¯’è½¯ä»¶ã€æ–‡ä»¶ç®¡ç†å™¨ï¼‰" -ForegroundColor Yellow
-        Write-Host "  3. ä»¥ç®¡ç†å‘˜æƒé™è¿è¡Œ PowerShellï¼Œç„¶åé‡æ–°æ‰§è¡Œæ­¤è„šæœ¬" -ForegroundColor Yellow
-        Write-Host "  4. å¦‚æœè·¯å¾„åŒ…å«ä¸­æ–‡å­—ç¬¦ï¼Œå°è¯•å°†é¡¹ç›®ç§»åŠ¨åˆ°çº¯è‹±æ–‡è·¯å¾„" -ForegroundColor Yellow
+        Write-Host "¿ÉÄÜµÄ½â¾ö·½°¸£º" -ForegroundColor Yellow
+        Write-Host "  1. È·±£ ePrinty.exe Ã»ÓĞÕıÔÚÔËĞĞ" -ForegroundColor Yellow
+        Write-Host "  2. ¹Ø±ÕËùÓĞ¿ÉÄÜÕ¼ÓÃ¸ÃÎÄ¼şµÄ³ÌĞò£¨ÈçÉ±¶¾Èí¼ş¡¢ÎÄ¼ş¹ÜÀíÆ÷£©" -ForegroundColor Yellow
+        Write-Host "  3. ÒÔ¹ÜÀíÔ±È¨ÏŞÔËĞĞ PowerShell£¬È»ºóÖØĞÂÖ´ĞĞ´Ë½Å±¾" -ForegroundColor Yellow
+        Write-Host "  4. Èç¹ûÂ·¾¶°üº¬ÖĞÎÄ×Ö·û£¬³¢ÊÔ½«ÏîÄ¿ÒÆ¶¯µ½´¿Ó¢ÎÄÂ·¾¶" -ForegroundColor Yellow
         exit 1
     }
 } catch {
-    Write-Error "æ‰§è¡Œ mt.exe æ—¶å‡ºé”™: $_"
+    Write-Error "Ö´ĞĞ mt.exe Ê±³ö´í: $_"
     Write-Host ""
-    Write-Host "å¯èƒ½çš„è§£å†³æ–¹æ¡ˆï¼š" -ForegroundColor Yellow
-    Write-Host "  1. ç¡®ä¿ ePrinty.exe æ²¡æœ‰æ­£åœ¨è¿è¡Œ" -ForegroundColor Yellow
-    Write-Host "  2. ä»¥ç®¡ç†å‘˜æƒé™è¿è¡Œ PowerShell" -ForegroundColor Yellow
+    Write-Host "¿ÉÄÜµÄ½â¾ö·½°¸£º" -ForegroundColor Yellow
+    Write-Host "  1. È·±£ ePrinty.exe Ã»ÓĞÕıÔÚÔËĞĞ" -ForegroundColor Yellow
+    Write-Host "  2. ÒÔ¹ÜÀíÔ±È¨ÏŞÔËĞĞ PowerShell" -ForegroundColor Yellow
     exit 1
 }
 

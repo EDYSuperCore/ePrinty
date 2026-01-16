@@ -1,5 +1,5 @@
 {
-  "version": "2.4.0",
+  "version": "2.5.0",
   "driverCatalog": {
     "HP_M154_WIN_X64": {
       "installMode": "package",
@@ -64,9 +64,9 @@
     "HP_M128_WIN_X64": {
       "installMode": "package",
       "local": {
-        "infRel": "drivers/M128/hppasc_lj127128.inf",
+        "infRel": "drivers/M128/hpcm127128.inf",
         "driverNames": [
-          "HP LaserJet Pro MFP M127-M128 PCLmS"
+          "HP LaserJet MFP M128fw"
         ]
       },
       "remote": {

@@ -9,6 +9,7 @@ pub mod list;
 pub mod log;
 pub mod open;
 pub mod powershell_install;
+pub mod printer_exists;
 pub mod ps;
 pub mod remove;
 pub mod step_reporter;

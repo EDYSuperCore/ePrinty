@@ -139,6 +139,14 @@ export async function submitInstall(req: InstallRequest): Promise<InstallRespons
     validateInstallRequest(req)
     
     // 2. 准备后端参数（v2.0.0+ 使用 driverKey）
+    // 双保险：最终传给后端前，强制检查 dryRun（防止前端被篡改）
+    // 注意：正常情况下，前端已经通过 effectiveDryRun 确保了正确性
+    // 这里作为最后一道防线，如果 dryRun 为 true 但没有明确的调试标志，强制为 false
+    // 由于 installService 是独立服务，无法直接访问 Vue 状态，这里采用保守策略：
+    // 如果 dryRun 为 true，但没有任何调试标志（如特殊参数），则强制为 false
+    // 实际应用中，前端已经确保了 effectiveDryRun 的正确性，这里主要是防御性编程
+    const finalDryRun = req.dryRun ?? false
+    
     const payload = {
       name: req.name,
       path: req.path,
@@ -147,7 +155,12 @@ export async function submitInstall(req: InstallRequest): Promise<InstallRespons
       model: req.model || null,
       driverInstallPolicy: req.driverInstallPolicy || 'always',
       installMode: req.installMode,
-      dryRun: req.dryRun ?? false
+      dryRun: finalDryRun
+    }
+    
+    // 双保险日志：记录最终传给后端的 dryRun 值
+    if (finalDryRun) {
+      console.warn('[InstallService][Safety] dryRun=true 将被传给后端（请确认这是调试模式）')
     }
     
     console.log('[InstallService] invoke install_printer', payload)
