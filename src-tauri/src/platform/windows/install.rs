@@ -11,6 +11,9 @@ use tauri::Manager;
 
 use crate::install_event_emitter::emit_install_progress;
 
+#[cfg(windows)]
+use crate::platform::windows::driver_store_setupapi::stage_driver_and_get_published_name;
+
 
 // ============================================================================
 // 常量定义
@@ -281,13 +284,17 @@ async fn install_printer_package_branch(
         });
     }
     
-    // 阶段 B：真实执行 pnputil stage
-    eprintln!("[PackageBranch] dryRun=false，执行真实 pnputil stage");
+    // 阶段 B：使用 SetupAPI（fallback 到 pnputil）stage 驱动包
+    eprintln!("[PackageBranch] dryRun=false，执行驱动包注册（SetupAPI）");
     eprintln!("[PackageBranch] inf_path=\"{}\"", inf_path.display());
     
-    match stage_driver_package_windows(&inf_path) {
-        Ok(stage_result) => {
-            eprintln!("[PackageBranch] pnputil stage 成功 exit={:?} is_admin={}", stage_result.exit_code, is_admin);
+    match stage_driver_with_setupapi_fallback(&inf_path) {
+        Ok((published_name, published_inf_path, used_fallback, evidence)) => {
+            if used_fallback {
+                eprintln!("[PackageBranch] 驱动包注册成功（已回退到 pnputil）published_name=\"{}\" is_admin={}", published_name, is_admin);
+            } else {
+                eprintln!("[PackageBranch] 驱动包注册成功（SetupAPI）published_name=\"{}\" is_admin={}", published_name, is_admin);
+            }
             
             // 发送 StageDriver 成功事件
             emit_progress_event(
@@ -296,33 +303,21 @@ async fn install_printer_package_branch(
                 printer_name,
                 "driver.stageDriver",
                 "success",
-                "驱动包注册成功".to_string(),
+                if used_fallback {
+                    "驱动包注册成功（已回退到 pnputil）".to_string()
+                } else {
+                    "驱动包注册成功（SetupAPI）".to_string()
+                },
                 None,
                 None,
                 Some("stageDriver".to_string()),
             );
             
-            // 从 pnputil 输出中提取 published name（oemXXX.inf）
-            let published_name = extract_published_name(&stage_result.output_text);
-            let published_name = match published_name {
-                Some(name) => name,
-                None => {
-                    return Ok(InstallResult {
-                        success: false,
-                        message: "pnputil stage 成功，但无法从输出中提取 published name（oemXXX.inf）".to_string(),
-                        method: Some("Package".to_string()),
-                        stdout: Some(stage_result.output_text),
-                        stderr: Some("无法解析 published name".to_string()),
-                        effective_dry_run: dry_run,
-                        job_id: job_id.to_string(),
-                    });
-                }
-            };
+            eprintln!("[PackageBranch] published_name=\"{}\" published_inf_path=\"{}\" evidence=\"{}\"", 
+                published_name, published_inf_path, evidence);
             
-            eprintln!("[PackageBranch] extracted published_name=\"{}\"", published_name);
-            
-            // 构建 published_inf_path
-            let published_inf_path = format!(r"C:\Windows\INF\{}", published_name);
+            // 保存 evidence 以便后续错误处理使用
+            let stage_evidence = evidence.clone();
             
             // 步骤：注册打印机驱动
             // 发送 RegisterDriver 开始事件
@@ -364,7 +359,7 @@ async fn install_printer_package_branch(
                                 success: false,
                                 message: format!("无法识别目标路径格式: {}", e),
                                 method: Some("Package".to_string()),
-                                stdout: Some(stage_result.output_text),
+                                stdout: Some(stage_evidence.clone()),
                                 stderr: Some(e),
                                 effective_dry_run: dry_run,
                                 job_id: job_id.to_string(),
@@ -438,7 +433,7 @@ async fn install_printer_package_branch(
                                         success: false,
                                         message: format!("端口创建失败: {}", e),
                                         method: Some("Package".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: Some(e),
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),
@@ -492,11 +487,11 @@ async fn install_printer_package_branch(
                                     Ok(InstallResult {
                                         success: true,
                                         message: format!(
-                                            "Package 安装完成\n\nPublished name: {}\nDriver name: {}\nPort name: {}\nQueue name: {}\n\npnputil 输出:\n{}",
-                                            published_name, target_driver_name, port_name, name, stage_result.output_text
+                                            "Package 安装完成\n\nPublished name: {}\nDriver name: {}\nPort name: {}\nQueue name: {}\n\n驱动包注册信息:\n{}",
+                                            published_name, target_driver_name, port_name, name, stage_evidence
                                         ),
                                         method: Some("Package".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: None,
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),
@@ -527,7 +522,7 @@ async fn install_printer_package_branch(
                                         success: false,
                                         message: format!("队列创建失败: {}", e),
                                         method: Some("Package".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: Some(e),
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),
@@ -549,7 +544,7 @@ async fn install_printer_package_branch(
                                         conn_path, evidence
                                     ),
                                     method: Some("Package".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: Some(evidence),
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -585,11 +580,11 @@ async fn install_printer_package_branch(
                                 Ok(InstallResult {
                                     success: true,
                                     message: format!(
-                                        "Package 安装完成（共享连接已存在）\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\npnputil 输出:\n{}",
-                                        published_name, target_driver_name, conn_path, stage_result.output_text
+                                        "Package 安装完成（共享连接已存在）\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\n驱动包注册信息:\n{}",
+                                        published_name, target_driver_name, conn_path, stage_evidence
                                     ),
                                     method: Some("Package".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: None,
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -622,11 +617,11 @@ async fn install_printer_package_branch(
                                             Ok(InstallResult {
                                                 success: true,
                                                 message: format!(
-                                                    "Package 安装完成\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\npnputil 输出:\n{}",
-                                                    published_name, target_driver_name, conn_path, stage_result.output_text
+                                                    "Package 安装完成\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\n驱动包注册信息:\n{}",
+                                                    published_name, target_driver_name, conn_path, stage_evidence
                                                 ),
                                                 method: Some("Package".to_string()),
-                                                stdout: Some(stage_result.output_text),
+                                                stdout: Some(stage_evidence.clone()),
                                                 stderr: None,
                                                 effective_dry_run: dry_run,
                                                 job_id: job_id.to_string(),
@@ -639,7 +634,7 @@ async fn install_printer_package_branch(
                                                 success: false,
                                                 message: format!("共享连接创建失败: {}\n\n连接名称: {}\n\nEvidence: {}", stderr, conn_path, evidence),
                                                 method: Some("Package".to_string()),
-                                                stdout: Some(stage_result.output_text),
+                                                stdout: Some(stage_evidence.clone()),
                                                 stderr: Some(evidence),
                                                 effective_dry_run: dry_run,
                                                 job_id: job_id.to_string(),
@@ -653,7 +648,7 @@ async fn install_printer_package_branch(
                                             success: false,
                                             message: format!("共享连接创建命令失败: {}\n\n连接名称: {}\n\nEvidence: {}", e, conn_path, evidence),
                                             method: Some("Package".to_string()),
-                                            stdout: Some(stage_result.output_text),
+                                            stdout: Some(stage_evidence.clone()),
                                             stderr: Some(evidence),
                                             effective_dry_run: dry_run,
                                             job_id: job_id.to_string(),
@@ -688,11 +683,11 @@ async fn install_printer_package_branch(
                     Ok(InstallResult {
                         success: false,
                         message: format!(
-                            "pnputil stage 成功，但驱动注册失败\n\nPublished name: {}\nDriver name: {}\n\n错误:\n{}",
+                            "驱动包注册成功，但驱动注册失败\n\nPublished name: {}\nDriver name: {}\n\n错误:\n{}",
                             published_name, target_driver_name, e
                         ),
                         method: Some("Package".to_string()),
-                        stdout: Some(stage_result.output_text),
+                        stdout: Some(stage_evidence.clone()),
                         stderr: Some(e),
                         effective_dry_run: dry_run,
                         job_id: job_id.to_string(),
@@ -701,7 +696,7 @@ async fn install_printer_package_branch(
             }
         }
         Err(e) => {
-            eprintln!("[PackageBranch] pnputil stage 失败: {}", e);
+            eprintln!("[PackageBranch] 驱动包注册失败: {}", e);
             
             // ============================================================================
             // 错误分类：检查是否是权限拒绝错误
@@ -711,11 +706,12 @@ async fn install_printer_package_branch(
                 || error_lower.contains("access is denied")
                 || error_lower.contains("拒绝访问")
                 || error_lower.contains("0x5")
+                || error_lower.contains("0x80070005")
                 || has_permission_error(&e);
             
             if is_permission_error {
                 let evidence = format!(
-                    "step=pnputil_stage printer_name=\"{}\" path=\"{}\" inf_abs_path=\"{}\" is_admin={} error=\"{}\"",
+                    "step=stage_driver printer_name=\"{}\" path=\"{}\" inf_abs_path=\"{}\" is_admin={} error=\"{}\"",
                     name, path, inf_path.display(), is_admin, e
                 );
                 
@@ -1381,6 +1377,82 @@ fn is_running_as_admin() -> bool {
 #[cfg(not(windows))]
 fn is_running_as_admin() -> bool {
     false // 非 Windows 平台不需要权限提升
+}
+
+/// 使用 SetupAPI 或 fallback 到 pnputil 来 stage 驱动包并获取 published name
+/// 
+/// # 参数
+/// - `inf_path`: INF 文件的完整路径
+/// 
+/// # 返回
+/// - `Ok((published_name, published_inf_path, used_fallback, evidence))`: 成功
+/// - `Err(String)`: 失败
+#[cfg(windows)]
+fn stage_driver_with_setupapi_fallback(inf_path: &std::path::Path) -> Result<(String, String, bool, String), String> {
+    // 首先尝试使用 SetupAPI
+    match stage_driver_and_get_published_name(inf_path) {
+        Ok(result) => {
+            eprintln!("[StageDriver] method=SetupCopyOEMInfW success published_name=\"{}\" published_inf_path=\"{}\"", 
+                result.published_name, result.published_inf_path.display());
+            return Ok((
+                result.published_name,
+                result.published_inf_path.to_string_lossy().to_string(),
+                false,
+                result.evidence,
+            ));
+        }
+        Err(setupapi_error) => {
+            eprintln!("[StageDriver] method=SetupCopyOEMInfW failed error=\"{}\" win32_error=0x{:08X} evidence=\"{}\"", 
+                setupapi_error.message, setupapi_error.win32_error, setupapi_error.evidence);
+            
+            // Fallback 到 pnputil
+            eprintln!("[StageDriver] fallback=pnputil start");
+            match stage_driver_package_windows(inf_path) {
+                Ok(pnputil_result) => {
+                    // 从 pnputil 输出中提取 published name
+                    if let Some(published_name) = extract_published_name(&pnputil_result.output_text) {
+                        let published_inf_path = format!(r"C:\Windows\INF\{}", published_name);
+                        
+                        // 验证文件是否存在
+                        if std::path::Path::new(&published_inf_path).exists() {
+                            let evidence = format!(
+                                "method=pnputil_fallback setupapi_error=0x{:08X} published_name=\"{}\" published_inf_path=\"{}\"",
+                                setupapi_error.win32_error,
+                                published_name,
+                                published_inf_path
+                            );
+                            eprintln!("[StageDriver] fallback=pnputil success published_name=\"{}\"", published_name);
+                            return Ok((published_name, published_inf_path, true, evidence));
+                        } else {
+                            return Err(format!(
+                                "pnputil fallback 成功但 published INF 文件不存在: {}\n\nSetupAPI 错误: {}\n\npnputil 输出:\n{}",
+                                published_inf_path, setupapi_error, pnputil_result.output_text
+                            ));
+                        }
+                    } else {
+                        return Err(format!(
+                            "pnputil fallback 成功但无法从输出中提取 published name\n\nSetupAPI 错误: {}\n\npnputil 输出:\n{}",
+                            setupapi_error, pnputil_result.output_text
+                        ));
+                    }
+                }
+                Err(pnputil_error) => {
+                    // 两个方法都失败了
+                    let evidence = format!(
+                        "method=both_failed setupapi_error=0x{:08X} setupapi_evidence=\"{}\" pnputil_error=\"{}\"",
+                        setupapi_error.win32_error,
+                        setupapi_error.evidence,
+                        pnputil_error
+                    );
+                    eprintln!("[StageDriver] fallback=pnputil failed evidence=\"{}\"", evidence);
+                    return Err(format!(
+                        "导入驱动包失败（SetupAPI 和 pnputil 都失败）\n\nSetupAPI 错误: {}\n\npnputil 错误: {}\n\n证据: {}",
+                        setupapi_error, pnputil_error, evidence
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// 从输出中提取发布名称（oemXXX.inf）
@@ -4003,9 +4075,14 @@ async fn install_printer_windows_inner(
                 Some("stageDriver".to_string()),
             );
             
-            let stage_result = match stage_driver_package_windows(&inf_path) {
-                Ok(result) => {
-                    eprintln!("[ModernInf] step=pnputil_stage result=success exit_code={:?}", result.exit_code);
+            // 使用 SetupAPI（fallback 到 pnputil）stage 驱动包
+            let (published_name, published_inf_path, used_fallback, stage_evidence) = match stage_driver_with_setupapi_fallback(&inf_path) {
+                Ok((name, path, fallback, evidence)) => {
+                    if fallback {
+                        eprintln!("[ModernInf] step=stage_driver result=success method=pnputil_fallback published_name=\"{}\"", name);
+                    } else {
+                        eprintln!("[ModernInf] step=stage_driver result=success method=SetupCopyOEMInfW published_name=\"{}\"", name);
+                    }
                     
                     // 发送 StageDriver 成功事件
                     emit_progress_event(
@@ -4014,17 +4091,21 @@ async fn install_printer_windows_inner(
                         &name,
                         "driver.stageDriver",
                         "success",
-                        "驱动包注册成功".to_string(),
+                        if fallback {
+                            "驱动包注册成功（已回退到 pnputil）".to_string()
+                        } else {
+                            "驱动包注册成功（SetupAPI）".to_string()
+                        },
                         None,
                         None,
                         Some("stageDriver".to_string()),
                     );
                     
-                    result
+                    (name, path, fallback, evidence)
                 }
                 Err(e) => {
-                    let evidence = format!("pnputil_stage_failed error=\"{}\"", e);
-                    eprintln!("[ModernInf] step=pnputil_stage result=error evidence=\"{}\"", evidence);
+                    let evidence = format!("stage_driver_failed error=\"{}\"", e);
+                    eprintln!("[ModernInf] step=stage_driver result=error evidence=\"{}\"", evidence);
                     
                     // 发送 StageDriver 失败事件
                     emit_progress_event(
@@ -4036,7 +4117,7 @@ async fn install_printer_windows_inner(
                         format!("驱动包注册失败: {}", e),
                         None,
                         Some(crate::ErrorPayload {
-                            code: "PNPUTIL_STAGE_FAILED".to_string(),
+                            code: "STAGE_DRIVER_FAILED".to_string(),
                             detail: format!("驱动包注册失败: {}", e),
                             stdout: None,
                             stderr: Some(e.clone()),
@@ -4045,11 +4126,11 @@ async fn install_printer_windows_inner(
                     );
                     
                     if matches!(routing_policy, RoutingPolicy::LegacyFallback) {
-                        eprintln!("[RoutingDecision] fallback_to_legacy reason=pnputil_stage_failed error=\"{}\"", e);
+                        eprintln!("[RoutingDecision] fallback_to_legacy reason=stage_driver_failed error=\"{}\"", e);
                         // 继续到 legacy 路径
                         return Ok(InstallResult {
                             success: false,
-                            message: format!("pnputil stage 失败: {}\n\nEvidence: {}", e, evidence),
+                            message: format!("导入驱动包失败（SetupAPI）: {}\n\nEvidence: {}", e, evidence),
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
@@ -4059,7 +4140,7 @@ async fn install_printer_windows_inner(
                     } else {
                         return Ok(InstallResult {
                             success: false,
-                            message: format!("pnputil stage 失败: {}\n\nEvidence: {}", e, evidence),
+                            message: format!("导入驱动包失败（SetupAPI）: {}\n\nEvidence: {}", e, evidence),
                             method: Some("ModernInf".to_string()),
                             stdout: None,
                             stderr: Some(evidence),
@@ -4069,41 +4150,6 @@ async fn install_printer_windows_inner(
                     }
                 }
             };
-            
-            // 步骤 2：提取 published_name 并注册驱动
-            let published_name = match extract_published_name(&stage_result.output_text) {
-                Some(name) => name,
-                None => {
-                    let evidence = format!("extract_published_name_failed output=\"{}\"", 
-                        if stage_result.output_text.len() > 200 { &stage_result.output_text[..200] } else { &stage_result.output_text });
-                    eprintln!("[ModernInf] step=extract_published_name result=error evidence=\"{}\"", evidence);
-                    
-                    if matches!(routing_policy, RoutingPolicy::LegacyFallback) {
-                        eprintln!("[RoutingDecision] fallback_to_legacy reason=extract_published_name_failed");
-                        return Ok(InstallResult {
-                            success: false,
-                            message: format!("无法从 pnputil 输出中提取 published name\n\nEvidence: {}", evidence),
-                            method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
-                            stderr: Some(evidence),
-                            effective_dry_run: dry_run,
-                            job_id: job_id.to_string(),
-                        });
-                    } else {
-                        return Ok(InstallResult {
-                            success: false,
-                            message: format!("无法从 pnputil 输出中提取 published name\n\nEvidence: {}", evidence),
-                            method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
-                            stderr: Some(evidence),
-                            effective_dry_run: dry_run,
-                            job_id: job_id.to_string(),
-                        });
-                    }
-                }
-            };
-            
-            let published_inf_path = format!(r"C:\Windows\INF\{}", published_name);
             eprintln!("[ModernInf] step=register_driver inputs=driver_name=\"{}\" published_inf_path=\"{}\"", 
                 driver_name, published_inf_path);
             
@@ -4147,7 +4193,7 @@ async fn install_printer_windows_inner(
                             success: false,
                             message: format!("注册驱动失败: {}\n\nEvidence: {}", e, evidence),
                             method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
+                            stdout: Some(stage_evidence.clone()),
                             stderr: Some(evidence),
                             effective_dry_run: dry_run,
                             job_id: job_id.to_string(),
@@ -4157,7 +4203,7 @@ async fn install_printer_windows_inner(
                             success: false,
                             message: format!("注册驱动失败: {}\n\nEvidence: {}", e, evidence),
                             method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
+                            stdout: Some(stage_evidence.clone()),
                             stderr: Some(evidence),
                             effective_dry_run: dry_run,
                             job_id: job_id.to_string(),
@@ -4176,7 +4222,7 @@ async fn install_printer_windows_inner(
                         success: false,
                         message: format!("无法识别目标路径格式: {}\n\nEvidence: {}", e, evidence),
                         method: Some("ModernInf".to_string()),
-                        stdout: Some(stage_result.output_text),
+                        stdout: Some(stage_evidence.clone()),
                         stderr: Some(evidence),
                         effective_dry_run: dry_run,
                         job_id: job_id.to_string(),
@@ -4233,7 +4279,7 @@ async fn install_printer_windows_inner(
                                     success: false,
                                     message: format!("端口创建失败: {}\n\nEvidence: {}", e, evidence),
                                     method: Some("ModernInf".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: Some(evidence),
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -4243,7 +4289,7 @@ async fn install_printer_windows_inner(
                                     success: false,
                                     message: format!("端口创建失败: {}\n\nEvidence: {}", e, evidence),
                                     method: Some("ModernInf".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: Some(evidence),
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -4306,11 +4352,11 @@ async fn install_printer_windows_inner(
                             return Ok(InstallResult {
                                 success: true,
                                 message: format!(
-                                    "Modern INF 安装完成\n\nPublished name: {}\nDriver name: {}\nPort name: {}\nQueue name: {}\n\npnputil 输出:\n{}",
-                                    published_name, driver_name, port_name, name, stage_result.output_text
+                                    "Modern INF 安装完成\n\nPublished name: {}\nDriver name: {}\nPort name: {}\nQueue name: {}\n\n驱动包注册信息:\n{}",
+                                    published_name, driver_name, port_name, name, stage_evidence
                                 ),
                                 method: Some("ModernInf".to_string()),
-                                stdout: Some(stage_result.output_text),
+                                stdout: Some(stage_evidence.clone()),
                                 stderr: None,
                                 effective_dry_run: dry_run,
                                 job_id: job_id.to_string(),
@@ -4326,7 +4372,7 @@ async fn install_printer_windows_inner(
                                     success: false,
                                     message: format!("队列创建失败: {}\n\nEvidence: {}", e, evidence),
                                     method: Some("ModernInf".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: Some(evidence),
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -4336,7 +4382,7 @@ async fn install_printer_windows_inner(
                                     success: false,
                                     message: format!("队列创建失败: {}\n\nEvidence: {}", e, evidence),
                                     method: Some("ModernInf".to_string()),
-                                    stdout: Some(stage_result.output_text),
+                                    stdout: Some(stage_evidence.clone()),
                                     stderr: Some(evidence),
                                     effective_dry_run: dry_run,
                                     job_id: job_id.to_string(),
@@ -4358,7 +4404,7 @@ async fn install_printer_windows_inner(
                             success: false,
                             message: format!("无效的共享连接名称: \"{}\"\n\nEvidence: {}", conn_path, evidence),
                             method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
+                            stdout: Some(stage_evidence.clone()),
                             stderr: Some(evidence),
                             effective_dry_run: dry_run,
                             job_id: job_id.to_string(),
@@ -4386,11 +4432,11 @@ async fn install_printer_windows_inner(
                         return Ok(InstallResult {
                             success: true,
                             message: format!(
-                                "Modern INF 安装完成（共享连接已存在）\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\npnputil 输出:\n{}",
-                                published_name, driver_name, conn_path, stage_result.output_text
+                                "Modern INF 安装完成（共享连接已存在）\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\n驱动包注册信息:\n{}",
+                                published_name, driver_name, conn_path, stage_evidence
                             ),
                             method: Some("ModernInf".to_string()),
-                            stdout: Some(stage_result.output_text),
+                            stdout: Some(stage_evidence.clone()),
                             stderr: None,
                             effective_dry_run: dry_run,
                             job_id: job_id.to_string(),
@@ -4412,11 +4458,11 @@ async fn install_printer_windows_inner(
                                     return Ok(InstallResult {
                                         success: true,
                                         message: format!(
-                                            "Modern INF 安装完成\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\npnputil 输出:\n{}",
-                                            published_name, driver_name, conn_path, stage_result.output_text
+                                            "Modern INF 安装完成\n\nPublished name: {}\nDriver name: {}\nConnection: {}\n\n驱动包注册信息:\n{}",
+                                            published_name, driver_name, conn_path, stage_evidence
                                         ),
                                         method: Some("ModernInf".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: None,
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),
@@ -4432,7 +4478,7 @@ async fn install_printer_windows_inner(
                                             success: false,
                                             message: format!("共享连接创建失败: {}\n\nEvidence: {}", stderr, evidence),
                                             method: Some("ModernInf".to_string()),
-                                            stdout: Some(stage_result.output_text),
+                                            stdout: Some(stage_evidence.clone()),
                                             stderr: Some(evidence),
                                             effective_dry_run: dry_run,
                                             job_id: job_id.to_string(),
@@ -4442,7 +4488,7 @@ async fn install_printer_windows_inner(
                                             success: false,
                                             message: format!("共享连接创建失败: {}\n\nEvidence: {}", stderr, evidence),
                                             method: Some("ModernInf".to_string()),
-                                            stdout: Some(stage_result.output_text),
+                                            stdout: Some(stage_evidence.clone()),
                                             stderr: Some(evidence),
                                             effective_dry_run: dry_run,
                                             job_id: job_id.to_string(),
@@ -4460,7 +4506,7 @@ async fn install_printer_windows_inner(
                                         success: false,
                                         message: format!("共享连接创建命令失败: {}\n\nEvidence: {}", e, evidence),
                                         method: Some("ModernInf".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: Some(evidence),
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),
@@ -4470,7 +4516,7 @@ async fn install_printer_windows_inner(
                                         success: false,
                                         message: format!("共享连接创建命令失败: {}\n\nEvidence: {}", e, evidence),
                                         method: Some("ModernInf".to_string()),
-                                        stdout: Some(stage_result.output_text),
+                                        stdout: Some(stage_evidence.clone()),
                                         stderr: Some(evidence),
                                         effective_dry_run: dry_run,
                                         job_id: job_id.to_string(),

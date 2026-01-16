@@ -1,7 +1,10 @@
 pub mod archive;
 pub mod cmd;
+pub mod delete;
 pub mod driver_bootstrap;
 pub mod driver_fetch;
+#[cfg(windows)]
+pub mod driver_store_setupapi;
 pub mod encoding;
 pub mod enum_printers;
 pub mod install;

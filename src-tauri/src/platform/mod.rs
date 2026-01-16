@@ -248,3 +248,63 @@ pub fn open_url(url: &str) -> Result<(), String> {
         Err("当前仅支持 Windows 和 macOS 平台".to_string())
     }
 }
+
+/// 删除打印机结果（统一结构）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeletePrinterResult {
+    pub success: bool,
+    pub printer_name: String,
+    pub removed_queue: bool,
+    pub removed_port: bool,
+    pub removed_driver: bool,
+    pub driver_name: Option<String>,
+    pub port_name: Option<String>,
+    pub message: String,
+    pub evidence: Option<String>,
+}
+
+/// 平台统一的删除打印机入口
+/// 
+/// 根据当前平台调用相应的实现：
+/// - Windows: 调用 Windows 实现
+/// - macOS: 调用 macOS 实现
+pub fn delete_printer(printer_name: &str, remove_port: bool, remove_driver: bool) -> Result<DeletePrinterResult, String> {
+    #[cfg(windows)]
+    {
+        // Windows 平台：调用 Windows 实现
+        let result = crate::platform::windows::delete::delete_printer_windows(printer_name, remove_port, remove_driver)?;
+        Ok(DeletePrinterResult {
+            success: result.success,
+            printer_name: printer_name.to_string(),
+            removed_queue: result.removed_queue,
+            removed_port: result.removed_port,
+            removed_driver: result.removed_driver,
+            driver_name: result.driver_name,
+            port_name: result.port_name,
+            message: result.message,
+            evidence: result.evidence,
+        })
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        // macOS 平台：调用 macOS 实现（不支持 remove_driver）
+        let result = crate::platform::macos::delete::delete_printer_macos(printer_name, remove_port)?;
+        Ok(DeletePrinterResult {
+            success: result.success,
+            printer_name: printer_name.to_string(),
+            removed_queue: result.removed_queue,
+            removed_port: result.removed_port,
+            removed_driver: false, // macOS 不支持驱动删除
+            driver_name: None,
+            port_name: None,
+            message: result.message,
+            evidence: result.evidence,
+        })
+    }
+    
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        Err("当前仅支持 Windows 和 macOS 平台".to_string())
+    }
+}

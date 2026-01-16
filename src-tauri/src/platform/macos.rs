@@ -5,6 +5,7 @@ pub mod install;
 pub mod test_page;
 pub mod ipp_printers;
 pub mod cups_ffi;
+pub mod delete;
 
 /// macOS 平台打开 URL
 /// 

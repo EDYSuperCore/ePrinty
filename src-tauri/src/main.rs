@@ -1563,6 +1563,32 @@ fn list_printers_detailed() -> Result<Vec<crate::platform::DetailedPrinterInfo>,
     Ok(printers)
 }
 
+// 删除打印机
+#[tauri::command]
+fn delete_printer(
+    printer_name: String, 
+    remove_port: Option<bool>,
+    remove_driver: Option<bool>
+) -> Result<crate::platform::DeletePrinterResult, String> {
+    eprintln!("[DeletePrinter][Command] ENTER cmd=delete_printer printer_name=\"{}\" remove_port={:?} remove_driver={:?}", 
+        printer_name, remove_port, remove_driver);
+    
+    let remove_port_flag = remove_port.unwrap_or(false); // 默认 false 更安全
+    let remove_driver_flag = remove_driver.unwrap_or(false); // 默认 false
+    
+    // 强制约束：remove_driver=true 必须被视为"高级"
+    if remove_driver_flag {
+        eprintln!("[DeletePrinter][Command] WARN remove_driver=true (高级操作)");
+    }
+    
+    let result = crate::platform::delete_printer(&printer_name, remove_port_flag, remove_driver_flag)?;
+    
+    eprintln!("[DeletePrinter][Command] EXIT cmd=delete_printer success={} removed_queue={} removed_port={} removed_driver={}", 
+        result.success, result.removed_queue, result.removed_port, result.removed_driver);
+    
+    Ok(result)
+}
+
 // 安装打印机（v2.0.0+ 使用 driverKey 从 driverCatalog 获取驱动规格）
 #[cfg(windows)]
 #[tauri::command]
@@ -2504,6 +2530,7 @@ fn main() {
             download_update,
             get_system_info,
             reinstall_printer,
+            delete_printer,
             debug_extract_zip,
             debug_fetch_driver_payload
         ])
