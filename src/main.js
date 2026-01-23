@@ -20,3 +20,31 @@ const pinia = createPinia()
 app.use(pinia)
 app.mount('#app')
 
+// DPI 变化兜底监听
+let initialDPR = window.devicePixelRatio
+let layoutVersion = 0
+
+window.addEventListener('resize', () => {
+  const currentDPR = window.devicePixelRatio
+  if (currentDPR !== initialDPR) {
+    console.log(`[DPI Change] ${initialDPR} -> ${currentDPR}`)
+    initialDPR = currentDPR
+    layoutVersion++
+    
+    // 触发全局 reflow
+    window.dispatchEvent(new CustomEvent('dpi-changed', { 
+      detail: { 
+        dpr: currentDPR, 
+        layoutVersion 
+      } 
+    }))
+    
+    // 强制重新计算布局
+    requestAnimationFrame(() => {
+      document.body.style.display = 'none'
+      document.body.offsetHeight // 触发 reflow
+      document.body.style.display = ''
+    })
+  }
+})
+

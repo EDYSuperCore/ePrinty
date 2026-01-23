@@ -236,7 +236,7 @@
                 :install-mode="getInstallMode(printer)"
                 @install="handleInstall"
                 @retry-detect="retryDetect"
-                @reinstall="handleReinstall"
+                @delete="handleDelete"
                 @print-test-page="handlePrintTestPage"
                 @set-install-mode="(mode) => setInstallMode(printer, mode)"
               />
@@ -304,7 +304,10 @@
       class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
       @click.self="showHelp = false"
     >
-      <div class="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 overflow-hidden flex flex-col h-[600px]">
+      <div :class="[
+        'bg-white rounded-xl shadow-2xl w-full mx-4 overflow-hidden flex flex-col',
+        isMacOS ? 'max-w-2xl h-[500px]' : 'max-w-3xl h-[600px]'
+      ]">
         <!-- 对话框标题 -->
         <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 relative z-10 flex-shrink-0">
           <div class="flex items-center justify-between">
@@ -513,8 +516,13 @@
                   <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                       <div class="bg-blue-100 rounded-lg p-2">
-                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        <!-- Windows 图标 -->
+                        <svg v-if="!isMacOS" class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M0 0h11.377v11.372H0zm12.623 0H24v11.372H12.623zM0 12.628h11.377V24H0zm12.623 12.372H24V12.628H12.623z"/>
+                        </svg>
+                        <!-- macOS 图标 -->
+                        <svg v-else class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
                         </svg>
                       </div>
                       <div>
@@ -537,23 +545,6 @@
                       <div>
                         <p class="text-xs text-gray-500">系统架构</p>
                         <p class="text-sm font-medium text-gray-900">{{ systemInfoStore.info.arch }}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <!-- 应用版本 -->
-                <div class="bg-gray-50 rounded-lg p-4">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-3">
-                      <div class="bg-purple-100 rounded-lg p-2">
-                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p class="text-xs text-gray-500">应用版本</p>
-                        <p class="text-sm font-medium text-gray-900">v{{ systemInfoStore.info.appVersion }}</p>
                       </div>
                     </div>
                   </div>
@@ -603,11 +594,19 @@
                     </div>
                     <div>
                       <p class="text-sm font-medium text-gray-900">ePrinty</p>
-                      <p class="text-xs text-gray-500">版本 {{ version }}</p>
+                      <p class="text-xs text-gray-500">企业级打印机管理工具</p>
                     </div>
                   </div>
-                  <div class="border-t border-gray-200 pt-3">
-                    <p class="text-sm font-medium text-gray-900">易点云 研发中心核心业务组</p>
+                  <div class="border-t border-gray-200 pt-3 mt-3">
+                    <p class="text-sm text-gray-700 mb-2">
+                      ePrinty 是一款专为企业环境设计的打印机配置与管理工具，支持 Windows 和 macOS 平台，提供统一的打印机安装、配置和管理功能。
+                    </p>
+                    <p class="text-sm font-medium text-gray-900 mt-3">
+                      易点云 研发中心核心业务组
+                    </p>
+                    <p class="text-xs text-gray-500 mt-1">
+                      版权所有 © 2024
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1094,6 +1093,163 @@
               ]"
             >
               确定
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Windows 删除打印机确认对话框（清理级别选择） -->
+    <div 
+      v-if="showDeleteConfirmDialog && !isMacOS"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
+      @click.self="cancelDeleteConfirmDialog"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
+        <!-- 对话框标题 -->
+        <div class="px-6 py-4 border-b bg-yellow-50 border-yellow-200">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-yellow-900">确认删除打印机？</h3>
+            <button
+              @click="cancelDeleteConfirmDialog"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 对话框内容 -->
+        <div class="px-6 py-6">
+          <div class="mb-4">
+            <p class="text-sm text-gray-700 mb-4">
+              你可以选择删除范围。范围越大，清理越彻底，但可能影响其他打印机。
+            </p>
+            
+            <!-- 单选选项 -->
+            <div class="space-y-3">
+              <!-- 选项 A: 仅删除队列 -->
+              <label class="flex items-start space-x-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                :class="deleteConfirmDialog.selectedLevel === 'queue' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                <input
+                  type="radio"
+                  value="queue"
+                  v-model="deleteConfirmDialog.selectedLevel"
+                  class="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div class="flex-1">
+                  <div class="font-medium text-gray-900">仅删除打印机（推荐）</div>
+                  <div class="text-xs text-gray-500 mt-1">移除该打印机队列，不影响驱动和其他打印机</div>
+                </div>
+              </label>
+
+              <!-- 选项 B: 删除队列 + 端口 -->
+              <label class="flex items-start space-x-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                :class="deleteConfirmDialog.selectedLevel === 'queue_port' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                <input
+                  type="radio"
+                  value="queue_port"
+                  v-model="deleteConfirmDialog.selectedLevel"
+                  class="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div class="flex-1">
+                  <div class="font-medium text-gray-900">删除打印机 + 端口（网络异常时推荐）</div>
+                  <div class="text-xs text-gray-500 mt-1">同时删除网络端口，下次安装会重新创建</div>
+                </div>
+              </label>
+
+              <!-- 选项 C: 彻底清理 -->
+              <label class="flex items-start space-x-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                :class="deleteConfirmDialog.selectedLevel === 'full' ? 'border-red-500 bg-red-50' : 'border-gray-200'">
+                <input
+                  type="radio"
+                  value="full"
+                  v-model="deleteConfirmDialog.selectedLevel"
+                  class="mt-1 h-4 w-4 text-red-600 focus:ring-red-500"
+                />
+                <div class="flex-1">
+                  <div class="font-medium text-gray-900">彻底清理（高级）</div>
+                  <div class="text-xs text-gray-500 mt-1">同时删除驱动。可能影响使用相同驱动的其他打印机</div>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 对话框底部 -->
+        <div class="bg-gray-50 border-t border-gray-200 px-6 py-4">
+          <div class="flex items-center space-x-3">
+            <button
+              @click="cancelDeleteConfirmDialog"
+              class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmDeleteDialogAction"
+              class="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 彻底清理二次确认对话框 -->
+    <div 
+      v-if="showFullCleanupConfirmDialog"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 backdrop-blur-sm"
+      @click.self="cancelFullCleanupConfirmDialog"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+        <!-- 对话框标题 -->
+        <div class="px-6 py-4 border-b bg-red-50 border-red-200">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-red-900">确认彻底清理？</h3>
+            <button
+              @click="cancelFullCleanupConfirmDialog"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 对话框内容 -->
+        <div class="px-6 py-6">
+          <div class="flex items-start space-x-4">
+            <div class="rounded-full p-3 flex-shrink-0 bg-red-100">
+              <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <div class="text-sm text-gray-700 whitespace-pre-line">
+                该操作会删除打印驱动，可能影响系统中使用相同驱动的其他打印机。是否继续？
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 对话框底部 -->
+        <div class="bg-gray-50 border-t border-gray-200 px-6 py-4">
+          <div class="flex items-center space-x-3">
+            <button
+              @click="cancelFullCleanupConfirmDialog"
+              class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmFullCleanupDialogAction"
+              class="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+            >
+              继续清理
             </button>
           </div>
         </div>
@@ -1614,9 +1770,13 @@ import PrinterItem from './components/PrinterItem.vue'
 import AppTitleBar from "./components/AppTitleBar.vue"
 import { useInstallProgressStore } from './stores/installProgress'
 import { useSystemInfoStore } from './stores/systemInfo'
+import { usePrinterRuntimeStore } from './stores/printerRuntimeStore'
 import { getAppSettings, setAppSettings, getDriverInstallStrategy } from './settings/appSettings'
 import { createInstallProgressListener } from './services/installProgressListener'
 import { submitInstall, ensureActiveJob } from './services/installService'
+import * as configService from './services/configService'
+import * as printerDetectService from './services/printerDetectService'
+import * as printerMatch from './services/printerMatch'
 
 export default {
   name: 'App',
@@ -1712,6 +1872,20 @@ export default {
         title: '',
         message: ''
       },
+      // 删除打印机确认对话框（Windows 清理级别选择）
+      showDeleteConfirmDialog: false,
+      deleteConfirmDialog: {
+        title: '',
+        printer: null,
+        selectedLevel: 'queue', // 'queue' | 'queue_port' | 'full'
+        resolve: null
+      },
+      // 彻底清理二次确认对话框
+      showFullCleanupConfirmDialog: false,
+      fullCleanupConfirmDialog: {
+        printer: null,
+        resolve: null
+      },
       debugMode: true, // 调试模式开关（默认开启，始终记录日志）
       showDebugButton: false, // 调试按钮显示状态（默认隐藏，按 Ctrl+Shift+D 显示）
       debugModeEnabled: false, // 单一事实源：是否处于调试模式（仅通过 Ctrl+Shift+D 启用）
@@ -1732,13 +1906,13 @@ export default {
       {
           name: 'MeowDocs',
           description: '本地优先的 Markdown 笔记与知识管理工具',
-          url: 'https://example.com/meowdocs',
+          url: 'https://app.edianyun.icu',
           icon: '/MeowDoc.png' // 图标路径（public 目录）
         },
         {
           name: 'Across the Ocean to See You',
           description: '漂洋过海来看你',
-          url: 'https://example.com/atotsy',
+          url: 'https://app.edianyun.icu',
           icon: '/Across.png' // 图标路径（public 目录）
         }
       ]
@@ -2266,7 +2440,7 @@ export default {
       
       // 步骤 1: 先读取缓存配置，立即渲染
       try {
-        const cachedResult = await invoke('get_cached_config').catch(err => {
+        const cachedResult = await configService.loadCachedConfig().catch(err => {
           console.error('[CACHE_LOADED] 读取缓存失败:', err)
           throw err
         })
@@ -2321,7 +2495,7 @@ export default {
         this.configLoadState.lastRefreshError = null
         
         // 不 await，后台执行
-        invoke('refresh_remote_config').then(refreshResult => {
+        configService.refreshRemoteConfig().then(refreshResult => {
           console.log('[REMOTE_REFRESH_OK] 远程配置刷新成功')
           this.configLoadState.refreshing = false
           this.configLoadState.lastRefreshError = null
@@ -3323,134 +3497,217 @@ export default {
         message: ''
       }
     },
-    // 处理重装打印机
-    async handleReinstall(printer) {
+    // 显示删除确认对话框（Windows 清理级别选择，macOS 简单确认）
+    showDeleteConfirmDialogAsync(printer) {
+      return new Promise((resolve) => {
+        this.deleteConfirmDialog = {
+          title: '确认删除打印机？',
+          printer: printer,
+          selectedLevel: 'queue', // 默认选中"仅删除打印机"
+          resolve: resolve
+        }
+        this.showDeleteConfirmDialog = true
+      })
+    },
+    // 确认删除对话框：确定（Windows）
+    confirmDeleteDialogAction() {
+      const selectedLevel = this.deleteConfirmDialog.selectedLevel
+      
+      // 如果选择的是 full，需要二次确认
+      if (selectedLevel === 'full') {
+        // 先关闭当前对话框
+        this.showDeleteConfirmDialog = false
+        
+        // 显示彻底清理二次确认
+        this.showFullCleanupConfirmDialogAsync(this.deleteConfirmDialog.printer)
+          .then(confirmed => {
+            if (confirmed) {
+              // 用户确认彻底清理，执行删除
+              if (this.deleteConfirmDialog.resolve) {
+                this.deleteConfirmDialog.resolve({ confirmed: true, level: 'full' })
+              }
+            } else {
+              // 用户取消，重新显示清理级别选择对话框
+              this.showDeleteConfirmDialog = true
+            }
+          })
+      } else {
+        // queue 或 queue_port，直接执行
+        if (this.deleteConfirmDialog.resolve) {
+          this.deleteConfirmDialog.resolve({ confirmed: true, level: selectedLevel })
+        }
+        this.showDeleteConfirmDialog = false
+      }
+    },
+    // 取消删除确认对话框（Windows）
+    cancelDeleteConfirmDialog() {
+      if (this.deleteConfirmDialog.resolve) {
+        this.deleteConfirmDialog.resolve({ confirmed: false, level: null })
+      }
+      this.showDeleteConfirmDialog = false
+      this.deleteConfirmDialog = {
+        title: '',
+        printer: null,
+        selectedLevel: 'queue',
+        resolve: null
+      }
+    },
+    // 显示彻底清理二次确认对话框
+    showFullCleanupConfirmDialogAsync(printer) {
+      return new Promise((resolve) => {
+        this.fullCleanupConfirmDialog = {
+          printer: printer,
+          resolve: resolve
+        }
+        this.showFullCleanupConfirmDialog = true
+      })
+    },
+    // 确认彻底清理对话框：继续清理
+    confirmFullCleanupDialogAction() {
+      if (this.fullCleanupConfirmDialog.resolve) {
+        this.fullCleanupConfirmDialog.resolve(true)
+      }
+      this.showFullCleanupConfirmDialog = false
+      this.fullCleanupConfirmDialog = {
+        printer: null,
+        resolve: null
+      }
+    },
+    // 取消彻底清理确认对话框
+    cancelFullCleanupConfirmDialog() {
+      if (this.fullCleanupConfirmDialog.resolve) {
+        this.fullCleanupConfirmDialog.resolve(false)
+      }
+      this.showFullCleanupConfirmDialog = false
+      this.fullCleanupConfirmDialog = {
+        printer: null,
+        resolve: null
+      }
+    },
+    // 处理删除打印机
+    async handleDelete(printer) {
       // 防止重复调用：如果已经在处理中，直接返回
       if (this.reinstallingPrinters.has(printer.name)) {
         return
       }
 
-      // 提取 IP 地址
-      const ip = this.extractIpFromPath(printer.path)
-      
-      // 二次确认（使用 Vue 对话框）
-      const confirmMessage = ip
-        ? `将按名称 "${printer.name}" 和 IP "${ip}" 重新安装打印机。\n\n如果系统中已存在同名打印机，将提示您先手动删除后再重试。\n\n可能需要管理员权限。`
-        : `将按名称 "${printer.name}" 重新安装打印机。\n\n如果系统中已存在同名打印机，将提示您先手动删除后再重试。\n\n可能需要管理员权限。`
-      
-      // 使用 Vue 确认对话框
-      const confirmed = await this.showConfirmDialogAsync(
-        '确认重装（不推荐）',
-        confirmMessage,
-        'warning',
-        printer
-      )
-      
-      if (!confirmed) {
-        return
+      let removePort = false
+      let removeDriver = false
+
+      // Windows: 显示清理级别选择对话框
+      if (!this.isMacOS) {
+        const result = await this.showDeleteConfirmDialogAsync(printer)
+        
+        if (!result.confirmed) {
+          return
+        }
+
+        // 根据选择的级别设置参数
+        switch (result.level) {
+          case 'queue':
+            removePort = false
+            removeDriver = false
+            break
+          case 'queue_port':
+            removePort = true
+            removeDriver = false
+            break
+          case 'full':
+            removePort = true
+            removeDriver = true
+            break
+        }
+      } else {
+        // macOS: 简单确认对话框
+        const confirmMessage = `确认删除打印机 "${printer.name}"？\n\n将从系统中移除该打印机队列。删除后可重新安装。`
+        
+        const confirmed = await this.showConfirmDialogAsync(
+          '确认删除打印机',
+          confirmMessage,
+          'warning',
+          printer
+        )
+        
+        if (!confirmed) {
+          return
+        }
+        
+        // macOS 不支持端口和驱动删除
+        removePort = false
+        removeDriver = false
       }
 
-      // 添加到重装集合（确认后才添加，防止重复调用）
+      // 添加到删除集合（确认后才添加，防止重复调用）
       this.reinstallingPrinters.add(printer.name)
 
-      // 初始化重装进度
-      const steps = [
-        { name: '检查已安装的打印机', message: '' },
-        { name: '重新安装打印机', message: '' },
-        { name: '验证安装', message: '' }
-      ]
-
-      this.reinstallProgress = {
-        printerName: printer.name,
-        printerPath: printer.path,
-        steps: steps,
-        currentStep: 0,
-        success: false,
-        message: ''
-      }
-
-      // 显示进度对话框
-      this.showReinstallProgress = true
-      this.statusMessage = `正在重装 ${printer.name}...`
+      this.statusMessage = `正在删除 ${printer.name}...`
       this.statusType = 'info'
 
       try {
-        // 读取设置
-        const strategy = this.getDriverInstallStrategy()
+        console.log(`[DeletePrinter] 开始删除打印机: ${printer.name} removePort=${removePort} removeDriver=${removeDriver}`)
         
-        console.log(`[Reinstall] 开始重装打印机: ${printer.name}, ip=${ip || 'null'}`)
-        console.log(`[Reinstall] 设置: strategy=${strategy}`)
-
-        // 步骤 1: 检查已安装的打印机
-        this.updateReinstallProgressStep(0, '正在检查已安装的打印机...')
-        
-        // 调用后端重装（传递 config_name 和 ip）
-        // 后端会自动执行：检查 -> 重新安装 -> 写入标签
-        const resultPromise = invoke('reinstall_printer', {
-          configPrinterKey: printer.name,
-          configPrinterPath: printer.path,
-          configPrinterName: printer.name,
-          driverPath: printer.driver_path || null,
-          model: printer.model || null,
-          removePort: false, // 不再支持删除端口
-          removeDriver: false, // 不再支持删除驱动
-          driverInstallStrategy: strategy === 'always_install_inf' ? 'always' : 'reuse_if_installed'
+        // 调用后端删除命令
+        const result = await invoke('delete_printer', {
+          printerName: printer.name,
+          removePort: removePort,
+          removeDriver: removeDriver
         })
 
-        // 等待一小段时间后更新到安装步骤
-        await this.delay(500)
-        this.updateReinstallProgressStep(1, '正在重新安装打印机...')
-
-        // 等待后端操作完成
-        const result = await resultPromise
-
-        // 步骤 2: 验证安装
-        this.updateReinstallProgressStep(2, '正在验证安装...')
-        await this.delay(300)
-
         if (result.success) {
-          // 步骤 4: 验证安装
-          this.updateReinstallProgressStep(3, '验证安装成功')
-          await this.delay(200)
-
-          console.log(`[Reinstall] 重装成功: ${printer.name}`)
-          this.statusMessage = `已重装打印机: ${printer.name}`
+          console.log(`[DeletePrinter] 删除成功: ${printer.name}`)
+          this.statusMessage = `已删除打印机: ${printer.name}`
           this.statusType = 'success'
           
-          // 更新进度状态
-          this.reinstallProgress.success = true
-          this.reinstallProgress.message = result.message || '重装成功'
-          this.reinstallProgress.currentStep = this.reinstallProgress.steps.length
-
-          // 自动触发重新检测
-          await this.startDetectInstalledPrinters()
-
-          // 2秒后自动关闭进度对话框
-          setTimeout(() => {
-            if (this.reinstallProgress.currentStep >= this.reinstallProgress.steps.length) {
-              this.showReinstallProgress = false
-            }
-          }, 2000)
+          // A) 立即更新该打印机的 runtime 状态为 not_installed
+          if (this.printerRuntime[printer.name]) {
+            this.printerRuntime[printer.name].detectState = 'not_installed'
+            this.printerRuntime[printer.name].installedKey = null
+            this.printerRuntime[printer.name].systemQueueName = null
+            this.printerRuntime[printer.name].deviceUri = null
+            this.printerRuntime[printer.name].platform = null
+            this.printerRuntime[printer.name].displayName = null
+          }
+          
+          // B) 清理 installedKeyMap 中该打印机对应的缓存映射
+          if (this.installedKeyMap && this.installedKeyMap[printer.name]) {
+            delete this.installedKeyMap[printer.name]
+            this.saveInstalledKeyMap()
+          }
+          
+          // C) 触发一次重新检测 startDetectInstalledPrinters()（确保最终状态正确）
+          // 使用 debounce：若检测正在 running，标记 pending，结束后再跑一次
+          if (this.printerDetect.status === 'running') {
+            console.log('[DeletePrinter] 检测正在运行，将在完成后重新检测')
+            // 使用 debounce：等待当前检测完成
+            const checkInterval = setInterval(() => {
+              if (this.printerDetect.status !== 'running') {
+                clearInterval(checkInterval)
+                console.log('[DeletePrinter] 检测完成，触发重新检测以收敛状态')
+                this.startDetectInstalledPrinters().catch(() => {})
+              }
+            }, 500)
+            // 最多等待 30 秒
+            setTimeout(() => clearInterval(checkInterval), 30000)
+          } else {
+            // 立即触发重新检测
+            console.log('[DeletePrinter] 触发重新检测以收敛状态')
+            await this.startDetectInstalledPrinters()
+          }
         } else {
-          throw new Error(result.message || '重装失败')
+          throw new Error(result.message || '删除失败')
         }
       } catch (error) {
-        console.error(`[Reinstall] 重装失败: ${printer.name}`, error)
-        this.statusMessage = `重装失败: ${error.message || error}`
+        console.error(`[DeletePrinter] 删除失败: ${printer.name}`, error)
+        this.statusMessage = `删除失败: ${error.message || error}`
         this.statusType = 'error'
         
-        // 更新进度状态
-        this.reinstallProgress.success = false
-        this.reinstallProgress.message = error.message || error
-        this.reinstallProgress.currentStep = this.reinstallProgress.steps.length
-
         // 使用 Vue 错误对话框显示错误
         this.showErrorDialogAsync(
-          '重装失败',
+          '删除失败',
           `${error.message || error}\n\n请以管理员权限运行 ePrinty 或联系 IT`
         )
       } finally {
-        // 从重装集合中移除
+        // 从删除集合中移除
         this.reinstallingPrinters.delete(printer.name)
       }
     },

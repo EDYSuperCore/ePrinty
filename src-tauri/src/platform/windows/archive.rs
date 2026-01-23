@@ -309,7 +309,16 @@ fn generate_driver_uuid() -> String {
 /// 4. zip_slip_check: 检测路径越界
 /// 5. materialize_to_dest: 将 staging 内容复制到 dest_dir
 /// 6. cleanup_staging: 清理 staging 目录
+/// 
+/// # 已弃用
+/// 该函数已被新的 `extract_zip_for_driver` 函数（使用 Rust 原生 zip crate）替代。
+/// 新函数提供更好的性能、错误处理和可观测性。
+#[deprecated(
+    since = "1.4.1",
+    note = "使用 extract_zip_for_driver() 代替，它使用 Rust 原生 zip crate 而不依赖 PowerShell"
+)]
 pub fn extract_zip(zip_path: &Path, dest_dir: &Path, drivers_root: &Path) -> Result<ExtractResult, ExtractError> {
+    eprintln!("[ExtractZip] DEPRECATED: 请使用 extract_zip_for_driver() 代替"); 
     eprintln!("[ExtractZip] start zip_path=\"{}\" dest_dir=\"{}\" drivers_root=\"{}\"", 
         zip_path.display(), dest_dir.display(), drivers_root.display());
     
@@ -835,24 +844,42 @@ pub fn extract_zip_for_driver(
         staging_dir.display(), extracted_root.display());
     
     // 确保在函数返回前清理 staging_dir（使用 Drop trait）
+    // 支持环境变量 EPRINTY_KEEP_STAGING 来保留 staging 以便排查
     struct StagingCleanup {
         staging_dir: PathBuf,
+        should_cleanup: bool,
     }
     
     impl Drop for StagingCleanup {
         fn drop(&mut self) {
             if self.staging_dir.exists() {
-                let _ = fs::remove_dir_all(&self.staging_dir);
+                if self.should_cleanup {
+                    if let Err(e) = std::fs::remove_dir_all(&self.staging_dir) {
+                        eprintln!("[ExtractZipForDriver] cleanup_failed staging_dir=\"{}\" error=\"{}\"", 
+                            self.staging_dir.display(), e);
+                    } else {
+                        eprintln!("[ExtractZipForDriver] cleanup_success staging_dir=\"{}\"", 
+                            self.staging_dir.display());
+                    }
+                } else {
+                    eprintln!("[ExtractZipForDriver] cleanup_skipped staging_dir=\"{}\" reason=\"EPRINTY_KEEP_STAGING 已设置\"", 
+                        self.staging_dir.display());
+                }
             }
         }
     }
     
+    // 检查环境变量决定是否清理 staging
+    let keep_staging = std::env::var("EPRINTY_KEEP_STAGING").is_ok();
+    let should_cleanup = !keep_staging;
+    
     let _cleanup = StagingCleanup {
         staging_dir: staging_dir.clone(),
+        should_cleanup,
     };
     
     // ============================================================================
-    // Step 3: expand_archive - 解压到 staging
+    // Step 3: expand_archive - 解压到 staging（使用 Rust 原生 zip crate）
     // ============================================================================
     // 检查 ZIP 文件是否存在
     if !zip_path.exists() {
@@ -861,17 +888,8 @@ pub fn extract_zip_for_driver(
         });
     }
     
-    let zip_path_str = zip_path.to_string_lossy();
-    let staging_dir_str = staging_dir.to_string_lossy();
-    
-    // 转义路径中的单引号（PowerShell 需要）
-    let zip_path_escaped = zip_path_str.replace("'", "''");
-    let staging_dir_escaped = staging_dir_str.replace("'", "''");
-    
-    let script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-        zip_path_escaped, staging_dir_escaped
-    );
+    let zip_path_str = zip_path.to_string_lossy().to_string();
+    let staging_dir_str = staging_dir.to_string_lossy().to_string();
     
     eprintln!("[ExtractZipForDriver] step=expand_archive inputs=zip_path=\"{}\" staging_dir=\"{}\"", 
         zip_path.display(), staging_dir.display());
@@ -889,64 +907,52 @@ pub fn extract_zip_for_driver(
         None
     };
     
-    let output = match super::ps::run_powershell(&script) {
-        Ok(output) => output,
+    // 使用 Rust 原生 zip 解压器
+    let extract_result = match crate::utils::zip_extract::extract_zip_to_dir(
+        zip_path,
+        &staging_dir,
+        None, // cancel flag (暂不支持)
+        None, // progress callback (暂不集成，后续可加)
+    ) {
+        Ok(report) => report,
         Err(e) => {
+            let error_msg = format!("{}", e);
+            let staging_hint = if should_cleanup {
+                format!("（staging 目录将在函数返回时自动清理）")
+            } else {
+                format!("（staging 目录已保留供排查：{}）", staging_dir.display())
+            };
+            eprintln!("[ExtractZipForDriver] step=expand_archive result=failed error=\"{}\" {}", error_msg, staging_hint);
+            
             // 发送失败事件
             if let Some(reporter) = step_reporter_opt.take() {
                 let _ = reporter.failed(
-                    "EXTRACT_POWERSHELL_FAILED".to_string(),
-                    format!("解压失败：PowerShell 执行失败: {}", e),
+                    "EXTRACT_FAILED".to_string(),
+                    format!("解压失败: {} | ZIP: {} | Dest: {} | {}", error_msg, zip_path.display(), staging_dir.display(), staging_hint),
                     None,
-                    Some(e.clone()),
+                    Some(error_msg.clone()),
                     None,
                 );
             }
+            
             return Err(ExtractError::ExtractFailed {
                 step: "expand_archive",
-                zip_path: zip_path_str.to_string(),
-                dest_dir: staging_dir_str.to_string(),
+                zip_path: zip_path_str,
+                dest_dir: staging_dir_str,
                 stdout: String::new(),
-                stderr: e,
+                stderr: error_msg,
                 exit_code: None,
             });
         }
     };
     
-    let stdout = crate::platform::windows::encoding::decode_windows_string(&output.stdout);
-    let stderr = crate::platform::windows::encoding::decode_windows_string(&output.stderr);
-    let exit_code = output.status.code();
-    
-    if !output.status.success() {
-        let evidence = format!(
-            "step=expand_archive zip_path=\"{}\" staging_dir=\"{}\" exit_code={:?} stdout_len={} stderr_len={}",
-            zip_path.display(), staging_dir.display(), exit_code, stdout.len(), stderr.len()
-        );
-        eprintln!("[ExtractZipForDriver] step=expand_archive result=failed evidence=\"{}\"", evidence);
-        
-        // 发送失败事件
-        if let Some(reporter) = step_reporter_opt.take() {
-            let _ = reporter.failed(
-                "EXTRACT_FAILED".to_string(),
-                format!("解压失败：PowerShell Expand-Archive 执行失败 (exit_code={:?})", exit_code),
-                Some(stdout.clone()),
-                Some(stderr.clone()),
-                None,
-            );
-        }
-        
-        return Err(ExtractError::ExtractFailed {
-            step: "expand_archive",
-            zip_path: zip_path_str.to_string(),
-            dest_dir: staging_dir_str.to_string(),
-            stdout,
-            stderr,
-            exit_code,
-        });
-    }
-    
-    eprintln!("[ExtractZipForDriver] step=expand_archive result=success exit_code={:?} stdout_len={} stderr_len={}", 
-        exit_code, stdout.len(), stderr.len());
+    eprintln!(
+        "[ExtractZipForDriver] step=expand_archive result=success files_extracted={} dirs_created={} bytes_written={} elapsed_ms={}",
+        extract_result.files_extracted,
+        extract_result.directories_created,
+        extract_result.bytes_written,
+        extract_result.elapsed_ms
+    );
     
     // ============================================================================
     // Step 4: zip_slip_check - 检测路径越界（相对于 uuid_root）

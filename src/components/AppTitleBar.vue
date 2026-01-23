@@ -17,18 +17,18 @@
       </div>
     </div>
 
-    <!-- 中：留白（Windows 可拖拽，macOS 不拖拽） -->
+    <!-- 中：留白（Windows 可拖拽，macOS 不拖拽，仅此区域可拖拽） -->
     <div class="spacer" :data-tauri-drag-region="!isMacOS"></div>
 
-    <!-- 右：业务操作按钮（不可拖拽） -->
-    <div class="actions" data-tauri-drag-region="false">
-      <slot name="actions" />
-    </div>
-
-    <!-- 右上：窗口按钮（仅 Windows 显示） -->
-    <div v-if="!isMacOS" class="win" data-tauri-drag-region="false">
-      <button class="win-btn" type="button" aria-label="Minimize" @click="minimize">—</button>
-      <button class="win-btn win-close" type="button" aria-label="Close" @click="close">✕</button>
+    <!-- 右：业务操作 + 窗口控制（均不可拖拽） -->
+    <div class="right" data-tauri-drag-region="false">
+      <div class="actions" data-tauri-drag-region="false">
+        <slot name="actions" />
+      </div>
+      <div v-if="!isMacOS" class="win" data-tauri-drag-region="false">
+        <button class="win-btn" type="button" aria-label="Minimize" @click="minimize">—</button>
+        <button class="win-btn win-close" type="button" aria-label="Close" @click="close">✕</button>
+      </div>
     </div>
   </header>
 </template>
@@ -123,11 +123,12 @@ onBeforeUnmount(() => {
 
 .titlebar {
   position: relative;
-  height: 90px;
-  display: flex;
+  height: 90px; /* 恢复原高度，避免整体压低 */
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px 0 14px;
+  column-gap: 10px;
+  padding: 0 0 0 14px;
   background: linear-gradient(135deg, 
     rgba(255, 255, 255, 1) 0%,
     rgba(249, 250, 251, 1) 20%,
@@ -162,6 +163,7 @@ onBeforeUnmount(() => {
   min-width: 320px;
   position: relative;
   z-index: 1;
+  height: 100%;
 }
 
 .icon-box {
@@ -243,17 +245,28 @@ onBeforeUnmount(() => {
 
 
 .spacer {
-  flex: 1;
   height: 100%;
   position: relative;
   z-index: 1;
 }
 
-.actions {
+.right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
-  padding-right: 48px;  /* 增加右侧间距，让按钮往左移 */
+  height: 100%;
+  -webkit-app-region: no-drag;
+  z-index: 1;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  padding-right: 8px;
+  flex-shrink: 1;
   -webkit-app-region: no-drag;
   position: relative;
   z-index: 1;
@@ -261,23 +274,25 @@ onBeforeUnmount(() => {
 
 .win {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  position: absolute;
-  top: 0px;
-  right: 0px;
+  align-items: flex-start; /* 顶部对齐，避免垂直居中产生上方空隙感 */
+  justify-content: flex-end;
+  height: 100%;
+  gap: 0;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  position: relative;
   z-index: 2;
 }
 
 .win-btn {
-  width: 28px !important;
-  height: 22px !important;
-  padding: 0 !important;
+  width: 46px;
+  height: 32px;
+  padding: 0;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-size: 12px !important;
-  line-height: 1 !important;
+  font-size: 12px;
+  line-height: 1;
   color: #111827;
   display: inline-flex;
   align-items: center;

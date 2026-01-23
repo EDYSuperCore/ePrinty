@@ -1,6 +1,6 @@
 [package]
 name = "easy-printer"
-version = "1.4.1"
+version = "1.4.3"
 description = "ePrinty - 让打印这件事，简单一点"
 authors = ["you"]
 license = ""
@@ -22,6 +22,8 @@ sha2 = "0.10"
 futures-util = "0.3"
 walkdir = "2"
 url = "2.5"
+zip = "0.6"
+tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "shellapi", "sysinfoapi", "winbase", "wow64apiset", "securitybaseapi", "processthreadsapi", "handleapi", "winspool", "winnt", "errhandlingapi", "dwmapi"] }

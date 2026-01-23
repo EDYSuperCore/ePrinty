@@ -2,14 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+/* ============================================================================
+   全局 CSS 基线 - 修复 DPI 缩放下的布局问题
+   ============================================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
   margin: 0;
+}
+
+body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: transparent;  /* 透明背景，显示桌面 */
+  line-height: 1.5;
+  text-rendering: geometricPrecision;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  line-height: inherit;
+}
+
+/* 文本省略号工具类 */
+.ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #app {

@@ -1,19 +1,19 @@
-# PowerShell 脚本：在构建后嵌入 Windows manifest（请求管理员权限）
-# 使用方法：在构建完成后运行此脚本
+# PowerShell 脚本用于嵌入 Windows manifest 到已编译的 exe 文件
+# 用法示例（可选指定 exe 路径）：
 # ./embed_manifest.ps1 -ExePath "target/release/easy-printer.exe"
 
 param(
     [string]$ExePath = ""
 )
 
-# 获取脚本所在目录（src-tauri 目录）
+# 获取脚本所在的 src-tauri 目录
 $ScriptDir = if ($MyInvocation.MyCommand.Path) {
     Split-Path -Parent $MyInvocation.MyCommand.Path
 } else {
     Split-Path -Parent $PSCommandPath
 }
 
-# 如果当前目录不是 src-tauri，则切换到脚本目录
+# 确保在正确的 src-tauri 目录中（检查是否有 target 目录）
 $CurrentTargetPath = Join-Path $PWD "target"
 $ScriptTargetPath = Join-Path $ScriptDir "target"
 
@@ -22,21 +22,21 @@ if (-not (Test-Path $CurrentTargetPath)) {
         Set-Location $ScriptDir
         Write-Host "已切换到脚本目录: $ScriptDir" -ForegroundColor Cyan
     } else {
-        Write-Warning "当前目录和脚本目录都找不到 target 目录"
+        Write-Warning "当前目录和脚本目录都没有 target 目录"
         Write-Warning "当前目录: $PWD"
         Write-Warning "脚本目录: $ScriptDir"
     }
 }
 
 if ([string]::IsNullOrEmpty($ExePath)) {
-    # 如果没有指定路径，尝试自动查找
-    # 首先尝试 Release 目录
+    # 如果未指定路径，自动查找构建的 exe
+    # 优先查找 Release 版本
     $ReleaseDir = Join-Path $PWD "target\release"
     $DebugDir = Join-Path $PWD "target\debug"
     
-    # 查找 Release 目录中的 exe 文件（Tauri 生成的文件名可能不同）
+    # 优先 Release 版本的 exe（因为 Tauri 默认构建到这里）
     if (Test-Path $ReleaseDir) {
-        Write-Host "正在搜索 Release 目录: $ReleaseDir" -ForegroundColor Cyan
+        Write-Host "正在查找 Release 版本: $ReleaseDir" -ForegroundColor Cyan
         $exeFiles = Get-ChildItem -Path $ReleaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue | Where-Object { 
             $_.Name -notlike "*deps*" -and 
             $_.Name -notlike "*build*" -and
@@ -46,14 +46,14 @@ if ([string]::IsNullOrEmpty($ExePath)) {
         
         if ($exeFiles) {
             Write-Host "找到 $($exeFiles.Count) 个 exe 文件" -ForegroundColor Gray
-            # 优先选择主程序 exe（不是依赖项，通常在 release 根目录）
+            # 优先选择在主 exe（排除编译依赖的临时 release 产物）
             $mainExe = $exeFiles | Where-Object { 
                 $_.DirectoryName -eq $ReleaseDir -and
                 $_.Name -notmatch "^[a-f0-9]{16}"
             } | Select-Object -First 1
             
             if (-not $mainExe) {
-                # 如果根目录没找到，尝试在所有文件中找
+                # 如果没找到，放宽条件重试
                 $mainExe = $exeFiles | Where-Object { 
                     $_.Name -notmatch "^[a-f0-9]{16}"
                 } | Select-Object -First 1
@@ -68,13 +68,13 @@ if ([string]::IsNullOrEmpty($ExePath)) {
                 Write-Host "找到 Release 版本: $ExePath" -ForegroundColor Green
             }
         } else {
-            Write-Host "Release 目录中未找到符合条件的 exe 文件" -ForegroundColor Gray
+            Write-Host "Release 目录中没有找到符合条件的 exe 文件" -ForegroundColor Gray
         }
     }
     
-    # 如果 Release 未找到，尝试 Debug 目录
+    # 如果 Release 找不到，尝试 Debug 版本
     if ([string]::IsNullOrEmpty($ExePath) -and (Test-Path $DebugDir)) {
-        Write-Host "正在搜索 Debug 目录: $DebugDir" -ForegroundColor Cyan
+        Write-Host "正在查找 Debug 版本: $DebugDir" -ForegroundColor Cyan
         $exeFiles = Get-ChildItem -Path $DebugDir -Filter "*.exe" -File -ErrorAction SilentlyContinue | Where-Object { 
             $_.Name -notlike "*deps*" -and 
             $_.Name -notlike "*build*" -and
@@ -104,19 +104,19 @@ if ([string]::IsNullOrEmpty($ExePath)) {
                 Write-Host "找到 Debug 版本: $ExePath" -ForegroundColor Yellow
             }
         } else {
-            Write-Host "Debug 目录中未找到符合条件的 exe 文件" -ForegroundColor Gray
+            Write-Host "Debug 目录中没有找到符合条件的 exe 文件" -ForegroundColor Gray
         }
     }
     
     if ([string]::IsNullOrEmpty($ExePath)) {
-        Write-Host "未找到 exe 文件，请手动指定路径。例如：" -ForegroundColor Red
+        Write-Host "未找到 exe 文件，请手动指定路径或先构建项目：" -ForegroundColor Red
         Write-Host "  .\embed_manifest.ps1 -ExePath `"target\release\ePrinty.exe`"" -ForegroundColor Yellow
         Write-Host "  .\embed_manifest.ps1 -ExePath `"target\debug\ePrinty.exe`"" -ForegroundColor Yellow
         exit 1
     }
 }
 
-# 如果 ExePath 是相对路径，确保基于当前目录
+# 如果 ExePath 是相对路径，转换为绝对路径
 if (-not [System.IO.Path]::IsPathRooted($ExePath)) {
     $ExePath = Join-Path $PWD $ExePath
 }
@@ -126,36 +126,36 @@ if (-not (Test-Path $ExePath)) {
     exit 1
 }
 
-# 检查文件是否被占用（尝试以写入模式打开）
+# 检查文件是否被占用（是否可以写入）
 try {
     $fileStream = [System.IO.File]::Open($ExePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
     $fileStream.Close()
     $fileStream.Dispose()
 } catch {
-    Write-Error "无法访问 exe 文件，文件可能被占用: $ExePath"
-    Write-Error "请确保："
-    Write-Error "  1. ePrinty.exe 没有正在运行"
-    Write-Error "  2. 没有其他程序正在使用该文件"
-    Write-Error "  3. 以管理员权限运行 PowerShell"
+    Write-Error "无法写入 exe 文件，可能文件正在使用中: $ExePath"
+    Write-Error "请尝试："
+    Write-Error "  1. ePrinty.exe 是否正在运行？请关闭"
+    Write-Error "  2. 是否有杀毒软件占用？请暂时关闭"
+    Write-Error "  3. 是否有管理员权限？以管理员身份运行 PowerShell"
     exit 1
 }
 
 # 检查是否有管理员权限
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Warning "当前未以管理员权限运行 PowerShell"
-    Write-Warning "嵌入 manifest 可能需要管理员权限"
-    Write-Warning "建议：右键点击 PowerShell，选择'以管理员身份运行'"
-    $continue = Read-Host "是否继续尝试？(Y/N)"
+    Write-Warning "当前未以管理员身份运行 PowerShell"
+    Write-Warning "嵌入 manifest 操作可能会失败"
+    Write-Warning "建议右键点击 PowerShell 并选择'以管理员身份运行'"
+    $continue = Read-Host "是否继续？(Y/N)"
     if ($continue -ne "Y" -and $continue -ne "y") {
         Write-Host "已取消" -ForegroundColor Yellow
         exit 0
     }
 }
 
-# Manifest 路径也基于当前目录
+# Manifest 文件路径（在当前目录）
 $ManifestPath = "app.manifest"
-# 如果当前目录没有，尝试脚本目录
+# 如果不在当前目录，尝试脚本目录
 if (-not (Test-Path $ManifestPath)) {
     $ScriptManifestPath = Join-Path $ScriptDir "app.manifest"
     if (Test-Path $ScriptManifestPath) {
@@ -167,10 +167,10 @@ if (-not (Test-Path $ManifestPath)) {
     exit 1
 }
 
-Write-Host "正在嵌入 manifest 到: $ExePath"
+Write-Host "准备嵌入 manifest 到: $ExePath"
 Write-Host "使用 manifest: $ManifestPath"
 
-# 检查是否有 mt.exe（Windows SDK 工具）
+# 查找并使用 mt.exe（Windows SDK 工具）
 $MtPath = $null
 $PossiblePaths = @(
     "C:\Program Files (x86)\Windows Kits\10\bin\10.0.*\x64\mt.exe",
@@ -189,30 +189,30 @@ foreach ($pattern in $PossiblePaths) {
 
 if ($null -eq $MtPath) {
     Write-Warning "未找到 mt.exe，无法自动嵌入 manifest"
-    Write-Warning "请手动安装 Windows SDK，或使用 Resource Hacker 等工具"
-    Write-Warning "或者右键点击 exe -> 属性 -> 兼容性 -> 以管理员身份运行此程序"
+    Write-Warning "请手动安装 Windows SDK 或使用 Resource Hacker 等工具"
+    Write-Warning "手动嵌入方式：右键 exe -> 资源 -> 添加 -> 选择 app.manifest 作为资源类型 24 项 1"
     exit 1
 }
 
 # 使用 mt.exe 嵌入 manifest
 Write-Host "正在嵌入 manifest..." -ForegroundColor Cyan
 try {
-    # 使用 -nologo 参数减少输出，并捕获所有输出
+    # 使用 -nologo 参数减少输出，2>&1 捕获所有输出
     $result = & $MtPath -nologo -manifest $ManifestPath -outputresource:"$ExePath;1" 2>&1
     $exitCode = $LASTEXITCODE
     
     if ($exitCode -eq 0) {
-        Write-Host "?? 成功嵌入 manifest！" -ForegroundColor Green
-        Write-Host "现在应用将以管理员权限运行" -ForegroundColor Green
+        Write-Host "? 成功嵌入 manifest！" -ForegroundColor Green
+        Write-Host "现在应用将以管理员身份运行。" -ForegroundColor Green
     } else {
         Write-Error "嵌入 manifest 失败 (退出代码: $exitCode)"
-        Write-Error "错误信息: $result"
+        Write-Error "错误输出: $result"
         Write-Host ""
         Write-Host "可能的解决方案：" -ForegroundColor Yellow
         Write-Host "  1. 确保 ePrinty.exe 没有正在运行" -ForegroundColor Yellow
-        Write-Host "  2. 关闭所有可能占用该文件的程序（如杀毒软件、文件管理器）" -ForegroundColor Yellow
-        Write-Host "  3. 以管理员权限运行 PowerShell，然后重新执行此脚本" -ForegroundColor Yellow
-        Write-Host "  4. 如果路径包含中文字符，尝试将项目移动到纯英文路径" -ForegroundColor Yellow
+        Write-Host "  2. 关闭杀毒软件或将应用添加到白名单（杀毒软件可能会锁定文件）" -ForegroundColor Yellow
+        Write-Host "  3. 以管理员身份运行 PowerShell（右键选择'以管理员身份运行'）" -ForegroundColor Yellow
+        Write-Host "  4. 检查文件是否有只读属性（右键文件->属性->取消只读）" -ForegroundColor Yellow
         exit 1
     }
 } catch {
@@ -220,7 +220,7 @@ try {
     Write-Host ""
     Write-Host "可能的解决方案：" -ForegroundColor Yellow
     Write-Host "  1. 确保 ePrinty.exe 没有正在运行" -ForegroundColor Yellow
-    Write-Host "  2. 以管理员权限运行 PowerShell" -ForegroundColor Yellow
+    Write-Host "  2. 以管理员身份运行 PowerShell" -ForegroundColor Yellow
     exit 1
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "2.5.0",
+  "version": "3.0.0",
   "driverCatalog": {
     "HP_M154_WIN_X64": {
       "installMode": "package",
